@@ -1,0 +1,95 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-canvas font-sans text-ink antialiased;
+  }
+
+  ::selection {
+    @apply bg-orange-100 text-orange-700;
+  }
+}
+
+@layer components {
+  .ui-surface {
+    @apply rounded-2xl border border-slate-200/80 bg-white shadow-soft;
+  }
+
+  .ui-label {
+    @apply mb-1.5 block text-xs font-semibold uppercase tracking-wide text-ink-muted;
+  }
+
+  .ui-input {
+    @apply w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-ink
+      placeholder:text-ink-soft outline-none transition
+      focus:border-orange-400 focus:shadow-ring;
+  }
+
+  .ui-btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold
+      transition active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50;
+  }
+
+  .ui-btn-primary {
+    @apply ui-btn bg-orange-500 text-white shadow-soft hover:bg-orange-600;
+  }
+
+  .ui-btn-secondary {
+    @apply ui-btn border border-slate-200 bg-white text-ink hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700;
+  }
+
+  .ui-btn-ghost {
+    @apply ui-btn text-ink-muted hover:bg-slate-100 hover:text-ink;
+  }
+
+  .ui-page {
+    @apply animate-fade-up space-y-5;
+  }
+
+  .ui-stat {
+    @apply relative overflow-hidden rounded-2xl border border-slate-200/80 bg-white p-5 shadow-soft;
+  }
+
+  .ui-stat::after {
+    content: '';
+    @apply absolute inset-x-0 top-0 h-1;
+  }
+
+  .ui-stat-orange::after {
+    @apply bg-gradient-to-r from-orange-400 to-orange-500;
+  }
+
+  .ui-stat-blue::after {
+    @apply bg-gradient-to-r from-blue-400 to-blue-600;
+  }
+
+  .ui-stat-green::after {
+    @apply bg-gradient-to-r from-green-400 to-green-600;
+  }
+
+  .ui-stat-slate::after {
+    @apply bg-gradient-to-r from-slate-300 to-slate-400;
+  }
+}
+
+@layer utilities {
+  .bg-mesh {
+    background-color: #f5f7fa;
+    background-image:
+      radial-gradient(ellipse 80% 50% at 10% -10%, rgba(249, 115, 22, 0.12), transparent),
+      radial-gradient(ellipse 60% 40% at 90% 0%, rgba(37, 99, 235, 0.1), transparent),
+      radial-gradient(ellipse 50% 40% at 50% 100%, rgba(5, 150, 105, 0.08), transparent);
+  }
+}
+
+input:not([type='checkbox']):not([type='radio']):not([type='file']),
+select,
+textarea {
+  @apply ui-input;
+}
+
+textarea {
+  @apply min-h-[88px] resize-y;
+}
