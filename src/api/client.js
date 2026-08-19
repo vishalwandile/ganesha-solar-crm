@@ -1,4 +1,7 @@
-const API_BASE = import.meta.env.VITE_API_URL || ''
+const API_BASE = (import.meta.env.VITE_API_URL || 'https://ganesha-solar-crm.onrender.com').replace(
+  /\/$/,
+  ''
+)
 
 const TOKEN_KEY = 'gss_token'
 

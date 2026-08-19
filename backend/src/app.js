@@ -6,7 +6,7 @@ import helmet from 'helmet'
 import morgan from 'morgan'
 import cookieParser from 'cookie-parser'
 import { ZodError } from 'zod'
-import { config } from './config.js'
+import { config, isAllowedOrigin } from './config.js'
 import { requireAuth } from './middleware/auth.js'
 import { errorHandler, notFound, HttpError } from './middleware/error.js'
 import authRoutes from './routes/auth.js'
@@ -25,10 +25,15 @@ export function createApp() {
   app.use(
     cors({
       origin(origin, cb) {
-        if (!origin || config.frontendOrigins.includes(origin)) return cb(null, true)
-        return cb(new Error(`CORS blocked for origin: ${origin}`))
+        // Never throw here — a thrown error becomes 403 without CORS headers,
+        // which the browser reports as both CORS and 403.
+        if (isAllowedOrigin(origin)) return cb(null, true)
+        return cb(null, false)
       },
       credentials: true,
+      methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization'],
+      optionsSuccessStatus: 204,
     })
   )
   app.use(morgan(config.nodeEnv === 'production' ? 'combined' : 'dev'))
@@ -54,9 +59,6 @@ export function createApp() {
   app.use((err, req, res, next) => {
     if (err instanceof ZodError) {
       return next(new HttpError(400, 'Validation failed', err.flatten()))
-    }
-    if (err?.message?.startsWith('CORS blocked')) {
-      return next(new HttpError(403, err.message))
     }
     return next(err)
   })
