@@ -42,8 +42,8 @@ export const config = {
   documentsBucket: process.env.SUPABASE_DOCUMENTS_BUCKET || 'documents',
   photosBucket: process.env.SUPABASE_PHOTOS_BUCKET || 'photos',
   seedAdmin: {
-    name: process.env.SEED_ADMIN_NAME || 'Rahul Kadam',
-    username: process.env.SEED_ADMIN_USERNAME || 'rahul.kadam',
+    name: process.env.SEED_ADMIN_NAME || 'Vishal Wandile',
+    username: process.env.SEED_ADMIN_USERNAME || 'vishal.wandile',
     password: process.env.SEED_ADMIN_PASSWORD || 'admin123',
   },
 }

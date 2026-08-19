@@ -5,8 +5,8 @@ import { config } from '../config.js'
 
 const USERS = [
   {
-    name: 'Rahul Kadam',
-    username: 'rahul.kadam',
+    name: 'Vishal Wandile',
+    username: 'vishal.wandile',
     password: 'admin123',
     team: 'Admin',
     isAdmin: true,
@@ -66,6 +66,13 @@ async function main() {
   await client.connect()
 
   try {
+    // Rename legacy admin if still present
+    await client.query(
+      `update users
+       set name = 'Vishal Wandile', username = 'vishal.wandile', team = 'Admin', is_admin = true
+       where username = 'rahul.kadam' or lower(name) = 'rahul kadam'`
+    )
+
     for (const u of USERS) {
       const hash = await bcrypt.hash(u.password, 10)
       const { rows } = await client.query(

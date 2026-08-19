@@ -54,7 +54,7 @@ export default function Login() {
           <input
             value={username}
             onChange={(e) => setUsername(e.target.value)}
-            placeholder="rahul.kadam"
+            placeholder="vishal.wandile"
             autoComplete="username"
           />
         </div>
@@ -80,7 +80,7 @@ export default function Login() {
         </button>
 
         <p className="mt-5 text-center text-xs text-ink-soft">
-          Use seeded account <span className="font-semibold">rahul.kadam</span> /{' '}
+          Use seeded account <span className="font-semibold">vishal.wandile</span> /{' '}
           <span className="font-semibold">admin123</span>
         </p>
       </form>

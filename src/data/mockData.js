@@ -104,7 +104,7 @@ export const TEAMS = ['Admin', 'Installation', 'Sales', 'Office', 'Account', 'Lo
 export const OVERALL_STATUSES = ['New', 'In progress', 'Completed', 'On hold']
 
 export const USERS = [
-  { id: 'u1', name: 'Rahul Kadam', team: 'Admin', username: 'rahul.kadam', permissions: 'All categories' },
+  { id: 'u1', name: 'Vishal Wandile', team: 'Admin', username: 'vishal.wandile', permissions: 'All categories' },
   { id: 'u2', name: 'Priya Sawant', team: 'Office', username: 'priya.sawant', permissions: 'Name change, Rooftop solar, PM Suryaghar, Closure' },
   { id: 'u3', name: 'Ganesh More', team: 'Sales', username: 'ganesh.more', permissions: 'View only' },
   { id: 'u4', name: 'Sunita Jadhav', team: 'Account', username: 'sunita.jadhav', permissions: 'Finance' },

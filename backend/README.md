@@ -29,7 +29,7 @@ npm run dev        # http://localhost:4000
 
 | Username | Password | Team |
 |---|---|---|
-| `rahul.kadam` | `admin123` | Admin |
+| `vishal.wandile` | `admin123` | Admin |
 | `priya.sawant` | `office123` | Office |
 | `ganesh.more` | `sales123` | Sales |
 | `sunita.jadhav` | `account123` | Account |
