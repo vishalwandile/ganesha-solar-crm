@@ -1,14 +1,19 @@
 import { NavLink } from 'react-router-dom'
-import { IconBell, IconClose, IconDashboard, IconSun, IconTeam, IconUsers } from './Icons'
+import { IconBell, IconClose, IconDashboard, IconTeam, IconUsers } from './Icons'
+import { useCrm } from '../context/CrmContext'
+import { hasFeature } from '../data/features'
 
 const NAV_ITEMS = [
-  { to: '/', label: 'Dashboard', icon: IconDashboard, end: true },
-  { to: '/customers', label: 'Customers', icon: IconUsers },
-  { to: '/notifications', label: 'Notifications', icon: IconBell },
-  { to: '/users', label: 'Users & teams', icon: IconTeam },
+  { to: '/', label: 'Dashboard', icon: IconDashboard, end: true, feature: 'dashboard' },
+  { to: '/customers', label: 'Customers', icon: IconUsers, feature: 'customers' },
+  { to: '/notifications', label: 'Notifications', icon: IconBell, feature: 'notifications' },
+  { to: '/users', label: 'Users & teams', icon: IconTeam, feature: 'users' },
 ]
 
 export default function Sidebar({ open, onClose }) {
+  const { sessionUser } = useCrm()
+  const items = NAV_ITEMS.filter((item) => hasFeature(sessionUser, item.feature))
+
   return (
     <>
       <div
@@ -25,8 +30,12 @@ export default function Sidebar({ open, onClose }) {
       >
         <div className="flex items-center justify-between px-5 py-6">
           <div className="flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-orange-500 via-orange-400 to-green-500 text-white shadow-soft">
-              <IconSun className="h-6 w-6" />
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-white shadow-soft ring-1 ring-slate-200">
+              <img
+                src="/ganesha-solar-logo.png"
+                alt="Ganesha Solar logo"
+                className="h-full w-full object-contain"
+              />
             </div>
             <div>
               <div className="text-sm font-extrabold tracking-tight text-ink">Ganesha Solar</div>
@@ -41,7 +50,7 @@ export default function Sidebar({ open, onClose }) {
         </div>
 
         <nav className="flex flex-1 flex-col gap-1 px-3">
-          {NAV_ITEMS.map((item) => {
+          {items.map((item) => {
             const Icon = item.icon
             return (
               <NavLink

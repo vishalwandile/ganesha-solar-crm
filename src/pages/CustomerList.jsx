@@ -4,32 +4,29 @@ import Layout from '../components/Layout'
 import StatusBadge from '../components/StatusBadge'
 import { IconPlus, IconSearch } from '../components/Icons'
 import { useCrm } from '../context/CrmContext'
+import { hasFeature } from '../data/features'
 
 export default function CustomerList() {
-  const { customers, refreshCustomers } = useCrm()
+  const { customers, customerPagination, refreshCustomers, sessionUser } = useCrm()
   const [query, setQuery] = useState('')
+  const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     let alive = true
-    ;(async () => {
+    setLoading(true)
+    const t = setTimeout(async () => {
       try {
-        await refreshCustomers()
+        await refreshCustomers(query.trim(), page)
       } finally {
         if (alive) setLoading(false)
       }
-    })()
+    }, 250)
     return () => {
       alive = false
+      clearTimeout(t)
     }
-  }, [refreshCustomers])
-
-  useEffect(() => {
-    const t = setTimeout(() => {
-      refreshCustomers(query.trim())
-    }, 250)
-    return () => clearTimeout(t)
-  }, [query, refreshCustomers])
+  }, [query, page, refreshCustomers])
 
   return (
     <Layout title="Customers" subtitle="Search and manage solar consumers">
@@ -38,15 +35,20 @@ export default function CustomerList() {
           <IconSearch className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-soft" />
           <input
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search by name, consumer number, or mobile"
+            onChange={(e) => {
+              setQuery(e.target.value)
+              setPage(1)
+            }}
+            placeholder="Search by name or consumer number"
             className="pl-10"
           />
         </div>
-        <Link to="/customers/new" className="ui-btn-primary shrink-0">
-          <IconPlus className="h-4 w-4" />
-          Add customer
-        </Link>
+        {hasFeature(sessionUser, 'createCustomer') && (
+          <Link to="/customers/new" className="ui-btn-primary shrink-0">
+            <IconPlus className="h-4 w-4" />
+            Add customer
+          </Link>
+        )}
       </div>
 
       <div className="ui-surface overflow-hidden">
@@ -81,7 +83,10 @@ export default function CustomerList() {
                     </span>
                   </td>
                   <td className="px-5 py-3.5">
-                    <StatusBadge status={c.overallStatus} />
+                    <div className="flex flex-wrap gap-1.5">
+                      <StatusBadge status={c.overallStatus} />
+                      {!c.isActive && <StatusBadge status="Inactive" />}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -101,6 +106,32 @@ export default function CustomerList() {
               )}
             </tbody>
           </table>
+        </div>
+        <div className="flex flex-col gap-2 border-t border-slate-100 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <span className="text-xs text-ink-muted">
+            {customerPagination.total} customer{customerPagination.total === 1 ? '' : 's'} · newest first
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="ui-btn-secondary px-3 py-1.5 text-xs"
+              disabled={loading || page <= 1}
+              onClick={() => setPage((current) => Math.max(1, current - 1))}
+            >
+              Previous
+            </button>
+            <span className="text-xs font-semibold text-ink">
+              Page {customerPagination.page} of {customerPagination.totalPages}
+            </span>
+            <button
+              type="button"
+              className="ui-btn-secondary px-3 py-1.5 text-xs"
+              disabled={loading || page >= customerPagination.totalPages}
+              onClick={() => setPage((current) => current + 1)}
+            >
+              Next
+            </button>
+          </div>
         </div>
       </div>
     </Layout>

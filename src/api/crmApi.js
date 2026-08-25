@@ -27,9 +27,10 @@ export const crmApi = {
     return apiRequest(`/api/activity/recent?limit=${limit}`)
   },
 
-  listCustomers(search = '') {
-    const q = search ? `?search=${encodeURIComponent(search)}` : ''
-    return apiRequest(`/api/customers${q}`)
+  listCustomers(search = '', page = 1, pageSize = 20) {
+    const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) })
+    if (search) params.set('search', search)
+    return apiRequest(`/api/customers?${params}`)
   },
 
   quickLookup(query) {
@@ -44,10 +45,17 @@ export const crmApi = {
     return apiRequest('/api/customers', { method: 'POST', body: payload })
   },
 
-  updateOverallStatus(id, overallStatus) {
-    return apiRequest(`/api/customers/${id}/overall-status`, {
+  setCustomerActive(id, isActive) {
+    return apiRequest(`/api/customers/${id}/active`, {
       method: 'PATCH',
-      body: { overallStatus },
+      body: { isActive },
+    })
+  },
+
+  saveCategory(id, category, payload) {
+    return apiRequest(`/api/customers/${id}/categories/${category}`, {
+      method: 'PATCH',
+      body: payload,
     })
   },
 
@@ -91,9 +99,10 @@ export const crmApi = {
     return apiRequest(`/api/customers/${id}/payments`, { method: 'POST', body: payment })
   },
 
-  uploadDocument(id, type, file) {
+  uploadDocument(id, type, file, customName = '') {
     const form = new FormData()
     form.append('type', type)
+    if (customName) form.append('customName', customName)
     form.append('file', file)
     return apiRequest(`/api/customers/${id}/documents`, { method: 'POST', body: form })
   },
@@ -107,6 +116,10 @@ export const crmApi = {
 
   listNotifications() {
     return apiRequest('/api/notifications')
+  },
+
+  unreadNotificationCount() {
+    return apiRequest('/api/notifications/unread-count')
   },
 
   markNotificationRead(id) {
@@ -124,4 +137,13 @@ export const crmApi = {
   createUser(payload) {
     return apiRequest('/api/users', { method: 'POST', body: payload })
   },
+
+  deleteUser(id) {
+    return apiRequest(`/api/users/${id}`, { method: 'DELETE' })
+  },
+
+  updateUserAccess(id, payload) {
+    return apiRequest(`/api/users/${id}/access`, { method: 'PATCH', body: payload })
+  },
+
 }

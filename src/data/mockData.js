@@ -65,7 +65,7 @@ export const CATEGORY_DEFS = [
     key: 'finance',
     label: 'Finance',
     owner: 'Account',
-    optional: false,
+    optional: true,
     subStages: [
       { key: 'bankLoan', label: 'Bank loan', options: ['Not applicable', 'Request submitted', 'Completed', 'Rejected'] },
     ],
@@ -95,13 +95,13 @@ export const CATEGORY_DEFS = [
   },
 ]
 
-export const DOCUMENT_TYPES = ['Aadhaar', 'Electricity bill', 'Bank passbook']
+export const DOCUMENT_TYPES = ['Aadhaar', 'Electricity bill', 'Bank passbook', 'Other']
 
 export const PAYMENT_MODES = ['Cash', 'Bank transfer', 'Cheque', 'UPI']
 
 export const TEAMS = ['Admin', 'Installation', 'Sales', 'Office', 'Account', 'Loan']
 
-export const OVERALL_STATUSES = ['New', 'In progress', 'Completed', 'On hold']
+export const OVERALL_STATUSES = ['New', 'In progress', 'Completed']
 
 export const USERS = [
   { id: 'u1', name: 'Vishal Wandile', team: 'Admin', username: 'vishal.wandile', permissions: 'All categories' },
@@ -237,7 +237,7 @@ export const CUSTOMERS = [
     solarCapacity: '5 kW',
     solarModule: 'Waaree 540W Mono PERC x 10',
     inverter: 'Growatt 5kW on-grid',
-    overallStatus: 'On hold',
+    overallStatus: 'In progress',
     createdAt: '2026-05-20',
     categories: {
       nameChange: null,

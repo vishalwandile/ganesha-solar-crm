@@ -1,5 +1,6 @@
 import { query } from '../db.js'
 import { toDbCategory } from '../lib/keys.js'
+import { hasFeature } from '../lib/features.js'
 import { HttpError } from './error.js'
 
 /**
@@ -28,5 +29,21 @@ export function requireCategoryEdit(paramName = 'category') {
     } catch (err) {
       next(err)
     }
+  }
+}
+
+export function requireFeature(featureKey) {
+  return (req, _res, next) => {
+    if (hasFeature(req.user, featureKey)) return next()
+    return next(new HttpError(403, 'You do not have access to this feature'))
+  }
+}
+
+export function requireCategoryFeature() {
+  return (req, _res, next) => {
+    const category = req.params.category || req.body?.category
+    const key = category === 'pmSuryaghar' || category === 'pm_suryaghar' ? 'pmSuryaghar' : 'statusTracking'
+    if (hasFeature(req.user, key)) return next()
+    return next(new HttpError(403, 'You do not have access to this feature'))
   }
 }

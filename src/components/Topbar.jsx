@@ -1,10 +1,11 @@
 import { Link } from 'react-router-dom'
 import { useCrm } from '../context/CrmContext'
 import { IconBell, IconMenu } from './Icons'
+import { hasFeature } from '../data/features'
 
 export default function Topbar({ title, subtitle, onMenu }) {
-  const { notifications, sessionUser, logout } = useCrm()
-  const unread = notifications.filter((n) => !n.read).length
+  const { unreadNotificationCount, sessionUser, logout } = useCrm()
+  const showNotifications = hasFeature(sessionUser, 'notifications')
   const initials = (sessionUser?.name || 'U')
     .split(' ')
     .map((n) => n[0])
@@ -26,18 +27,20 @@ export default function Topbar({ title, subtitle, onMenu }) {
         </div>
 
         <div className="flex items-center gap-2 sm:gap-3">
-          <Link
-            to="/notifications"
-            className="relative inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-ink-muted transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
-            aria-label="Notifications"
-          >
-            <IconBell className="h-5 w-5" />
-            {unread > 0 && (
-              <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-orange-500 px-1 text-[10px] font-bold text-white shadow-soft">
-                {unread}
-              </span>
-            )}
-          </Link>
+          {showNotifications && (
+            <Link
+              to="/notifications"
+              className="relative inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-ink-muted transition hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+              aria-label="Notifications"
+            >
+              <IconBell className="h-5 w-5" />
+              {unreadNotificationCount > 0 && (
+                <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-orange-500 px-1 text-[10px] font-bold text-white shadow-soft">
+                  {unreadNotificationCount}
+                </span>
+              )}
+            </Link>
+          )}
 
           <div className="flex items-center gap-2.5 rounded-2xl border border-slate-200 bg-white py-1.5 pl-1.5 pr-2 sm:pr-3">
             <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-green-500 text-xs font-bold text-white">

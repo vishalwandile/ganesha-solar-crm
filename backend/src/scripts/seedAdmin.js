@@ -2,6 +2,7 @@ import bcrypt from 'bcryptjs'
 import 'dotenv/config'
 import pg from 'pg'
 import { config } from '../config.js'
+import { defaultFeaturesForTeam } from '../lib/features.js'
 
 const USERS = [
   {
@@ -75,16 +76,18 @@ async function main() {
 
     for (const u of USERS) {
       const hash = await bcrypt.hash(u.password, 10)
+      const features = JSON.stringify(defaultFeaturesForTeam(u.team))
       const { rows } = await client.query(
-        `insert into users (name, username, password_hash, team, is_admin)
-         values ($1, $2, $3, $4, $5)
+        `insert into users (name, username, password_hash, team, is_admin, features)
+         values ($1, $2, $3, $4, $5, $6::jsonb)
          on conflict (username) do update
            set name = excluded.name,
                password_hash = excluded.password_hash,
                team = excluded.team,
-               is_admin = excluded.is_admin
+               is_admin = excluded.is_admin,
+               features = excluded.features
          returning id, username`,
-        [u.name, u.username, hash, u.team, u.isAdmin]
+        [u.name, u.username, hash, u.team, u.isAdmin, features]
       )
       const userId = rows[0].id
       await client.query(`delete from user_category_permissions where user_id = $1`, [userId])

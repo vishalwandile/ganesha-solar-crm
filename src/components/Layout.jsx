@@ -13,6 +13,9 @@ export default function Layout({ title, subtitle, children }) {
         <main className="flex-1 p-4 sm:p-6 lg:p-8">
           <div className="mx-auto max-w-7xl ui-page">{children}</div>
         </main>
+        <footer className="px-4 pb-5 text-center text-xs text-ink-soft sm:px-6">
+          © {new Date().getFullYear()} Ganesha Solar Services. All rights reserved.
+        </footer>
       </div>
     </div>
   )

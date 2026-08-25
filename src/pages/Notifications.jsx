@@ -6,12 +6,11 @@ import { useCrm } from '../context/CrmContext'
 export default function Notifications() {
   const {
     notifications,
+    unreadNotificationCount,
     refreshNotifications,
     markAllNotificationsRead,
     markNotificationRead,
   } = useCrm()
-  const unread = notifications.filter((n) => !n.read).length
-
   useEffect(() => {
     refreshNotifications().catch(() => {})
   }, [refreshNotifications])
@@ -24,7 +23,7 @@ export default function Notifications() {
             <IconBell className="h-4 w-4" />
           </span>
           <span>
-            <span className="font-bold text-ink">{unread}</span> unread
+            <span className="font-bold text-ink">{unreadNotificationCount}</span> unread
           </span>
         </div>
         <button type="button" onClick={() => markAllNotificationsRead()} className="ui-btn-secondary">

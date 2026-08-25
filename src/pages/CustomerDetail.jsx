@@ -7,16 +7,21 @@ import StageTracker from '../components/StageTracker'
 import PmSuryagharPortal from '../components/PmSuryagharPortal'
 import { IconDoc, IconPlus } from '../components/Icons'
 import { useCrm } from '../context/CrmContext'
+import { hasFeature } from '../data/features'
 import {
   CATEGORY_DEFS,
   PAYMENT_MODES,
   DOCUMENT_TYPES,
-  OVERALL_STATUSES,
-  calculateExpectedSubsidy,
-  parseCapacityKW,
 } from '../data/mockData'
 
-const TABS = ['Status tracking', 'PM Suryaghar', 'Documents', 'Payments', 'Photos', 'History']
+const TAB_DEFS = [
+  { label: 'Status tracking', feature: 'statusTracking' },
+  { label: 'PM Suryaghar', feature: 'pmSuryaghar' },
+  { label: 'Documents', feature: 'documents' },
+  { label: 'Payments', feature: 'payments' },
+  { label: 'Photos', feature: 'photos' },
+  { label: 'History', feature: 'history' },
+]
 
 export default function CustomerDetail() {
   const { id } = useParams()
@@ -24,26 +29,26 @@ export default function CustomerDetail() {
   const {
     customerCache,
     loadCustomer,
-    updateOverallStatus,
-    updateSubStage,
-    updateCategoryNotes,
-    updateCategoryExtra,
+    setCustomerActive,
+    saveCategory,
     enableCategory,
     disableCategory,
-    updateSubsidyMeta,
     addPayment,
     addDocument,
     addPhoto,
+    sessionUser,
   } = useCrm()
+  const visibleTabs = TAB_DEFS.filter((t) => hasFeature(sessionUser, t.feature)).map((t) => t.label)
 
   const customer = customerCache[id]
   const [loading, setLoading] = useState(!customer)
   const [error, setError] = useState('')
-  const [tab, setTab] = useState('Status tracking')
+  const [tab, setTab] = useState(() => visibleTabs[0] || 'Status tracking')
   const [expandedKey, setExpandedKey] = useState(null)
   const [newPayment, setNewPayment] = useState({ amount: '', mode: PAYMENT_MODES[0], date: '' })
   const [paymentError, setPaymentError] = useState('')
   const [docType, setDocType] = useState(DOCUMENT_TYPES[0])
+  const [docCustomName, setDocCustomName] = useState('')
   const [photoCaption, setPhotoCaption] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -64,6 +69,12 @@ export default function CustomerDetail() {
       alive = false
     }
   }, [id, loadCustomer])
+
+  useEffect(() => {
+    if (visibleTabs.length && !visibleTabs.includes(tab)) {
+      setTab(visibleTabs[0])
+    }
+  }, [tab, visibleTabs])
 
   if (loading && !customer) {
     return (
@@ -96,30 +107,17 @@ export default function CustomerDetail() {
     }
   }
 
-  function handleSubChange(categoryKey, subKey, value) {
-    if (subKey === 'rejectionReason') {
-      run(() => updateCategoryExtra(customer.id, categoryKey, { rejectionReason: value }))
-      return
+  async function handleSaveCategory(categoryKey, payload) {
+    setBusy(true)
+    setError('')
+    try {
+      await saveCategory(customer.id, categoryKey, payload)
+    } catch (err) {
+      setError(err.message || 'Update failed')
+      throw err
+    } finally {
+      setBusy(false)
     }
-    if (value === 'Rejected') {
-      const existing = customer.categories?.[categoryKey]?.rejectionReason
-      const reason = existing || window.prompt('Rejection reason (required):')
-      if (!reason?.trim()) {
-        setError('Rejection reason is required when status is Rejected')
-        return
-      }
-      run(() => updateSubStage(customer.id, categoryKey, subKey, value, reason.trim()))
-      return
-    }
-    run(() => updateSubStage(customer.id, categoryKey, subKey, value))
-  }
-
-  function handleNotes(categoryKey, text) {
-    run(() => updateCategoryNotes(customer.id, categoryKey, text))
-  }
-
-  function handleFinanceMeta(fields) {
-    run(() => updateCategoryExtra(customer.id, 'finance', fields))
   }
 
   function selectCategory(key) {
@@ -145,9 +143,16 @@ export default function CustomerDetail() {
 
   function handleDocUpload(e) {
     const file = e.target.files?.[0]
-    if (!file) return
-    run(() => addDocument(customer.id, docType, file))
     e.target.value = ''
+    if (!file) return
+    if (docType === 'Other' && !docCustomName.trim()) {
+      setError('Enter a name for this other document.')
+      return
+    }
+    run(async () => {
+      await addDocument(customer.id, docType, file, docType === 'Other' ? docCustomName.trim() : '')
+      setDocCustomName('')
+    })
   }
 
   function handlePhotoUpload(e) {
@@ -158,23 +163,40 @@ export default function CustomerDetail() {
     e.target.value = ''
   }
 
-  const totalPaid = (customer.payments || []).reduce((sum, p) => sum + p.amount, 0)
-  const expectedSubsidy =
-    customer.expectedSubsidy ??
-    calculateExpectedSubsidy(parseCapacityKW(customer.solarCapacity))
+  const loanReceived = Number(customer.categories?.finance?.amountReceived || 0)
+  const paymentEntries = [
+    ...(customer.payments || []),
+    ...(loanReceived > 0
+      ? [
+          {
+            id: 'finance-loan',
+            amount: loanReceived,
+            mode: 'Loan',
+            date: customer.categories?.finance?.receivedDate || '—',
+            derivedFromFinance: true,
+          },
+        ]
+      : []),
+  ].sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))
+  const totalPaid = paymentEntries.reduce((sum, payment) => sum + payment.amount, 0)
   const progress = customer.totalDue
     ? Math.min(100, Math.round((totalPaid / customer.totalDue) * 100))
     : 0
   const otherCategories = CATEGORY_DEFS.filter((c) => c.key !== 'pmSuryaghar')
 
   return (
-    <Layout title={customer.name} subtitle={`${customer.consumerNumber} · ${customer.mobile}`}>
+    <Layout title={customer.name}>
       {error && (
         <div className="rounded-xl bg-red-50 px-4 py-3 text-sm font-medium text-red-700 ring-1 ring-red-100">
           {error}
         </div>
       )}
       {busy && <div className="text-xs font-semibold text-blue-600">Saving…</div>}
+      {!customer.isActive && (
+        <div className="rounded-xl bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-700 ring-1 ring-slate-200">
+          This customer is inactive. Reactivate the customer before continuing pipeline work.
+        </div>
+      )}
 
       <div className="ui-surface flex flex-col gap-4 p-5 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex items-center gap-4">
@@ -199,19 +221,23 @@ export default function CustomerDetail() {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <label className="ui-label mb-0 mr-1">Overall status</label>
-          <select
-            className="w-40"
-            value={customer.overallStatus}
-            onChange={(e) => run(() => updateOverallStatus(customer.id, e.target.value))}
-          >
-            {OVERALL_STATUSES.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
           <StatusBadge status={customer.overallStatus} />
+          {!customer.isActive && <StatusBadge status="Inactive" />}
+          {hasFeature(sessionUser, 'inactiveCustomer') &&
+            (!customer.isActive || customer.overallStatus !== 'Completed') && (
+            <button
+              type="button"
+              className={customer.isActive ? 'ui-btn-secondary' : 'ui-btn-primary'}
+              onClick={() => {
+                const action = customer.isActive ? 'mark this customer inactive' : 'reactivate this customer'
+                if (window.confirm(`Are you sure you want to ${action}?`)) {
+                  run(() => setCustomerActive(customer.id, !customer.isActive))
+                }
+              }}
+            >
+              {customer.isActive ? 'Mark inactive' : 'Reactivate'}
+            </button>
+          )}
         </div>
       </div>
 
@@ -221,8 +247,9 @@ export default function CustomerDetail() {
         activeKey={tab === 'PM Suryaghar' ? 'pmSuryaghar' : expandedKey}
       />
 
+      {visibleTabs.length > 0 && (
       <div className="flex gap-1 overflow-x-auto rounded-2xl border border-slate-200/80 bg-white p-1.5 shadow-soft">
-        {TABS.map((t) => (
+        {visibleTabs.map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -238,19 +265,24 @@ export default function CustomerDetail() {
           </button>
         ))}
       </div>
+      )}
 
       {tab === 'Status tracking' && (
         <div className="space-y-3">
           <div className="rounded-2xl border border-blue-100 bg-gradient-to-r from-blue-50 to-green-50 px-4 py-3 text-sm">
             <span className="font-semibold text-blue-800">PM Suryaghar</span>
             <span className="text-ink-muted"> has a dedicated portal-style tab. </span>
-            <button
-              type="button"
-              className="font-bold text-blue-700 underline"
-              onClick={() => setTab('PM Suryaghar')}
-            >
-              Open PM Suryaghar portal
-            </button>
+            {hasFeature(sessionUser, 'pmSuryaghar') ? (
+              <button
+                type="button"
+                className="font-bold text-blue-700 underline"
+                onClick={() => setTab('PM Suryaghar')}
+              >
+                Open PM Suryaghar portal
+              </button>
+            ) : (
+              <span className="text-ink-muted">You do not have access to that tab.</span>
+            )}
           </div>
           {otherCategories.map((cat) => (
             <CategoryCard
@@ -261,14 +293,14 @@ export default function CustomerDetail() {
               notes={customer.categoryNotes?.[cat.key]}
               expanded={expandedKey === cat.key}
               onToggle={() => setExpandedKey((prev) => (prev === cat.key ? null : cat.key))}
-              onChange={(subKey, value) => handleSubChange(cat.key, subKey, value)}
-              onNotesChange={(text) => handleNotes(cat.key, text)}
+              onSave={(payload) => handleSaveCategory(cat.key, payload)}
               onEnable={cat.optional ? () => run(() => enableCategory(customer.id, cat.key)) : undefined}
               onDisable={
                 cat.optional ? () => run(() => disableCategory(customer.id, cat.key)) : undefined
               }
-              financeFields={cat.key === 'finance' ? customer.categories?.finance : null}
-              onFinanceChange={cat.key === 'finance' ? handleFinanceMeta : undefined}
+              saving={busy}
+              closureReady={customer.closureReady}
+              closureBlockers={customer.closureBlockers || []}
             />
           ))}
         </div>
@@ -279,11 +311,10 @@ export default function CustomerDetail() {
           customer={customer}
           data={customer.categories?.pmSuryaghar}
           notes={customer.categoryNotes?.pmSuryaghar || ''}
-          onNotesChange={(text) => handleNotes('pmSuryaghar', text)}
-          onChange={(subKey, value) => handleSubChange('pmSuryaghar', subKey, value)}
           subsidyAmount={customer.subsidyAmount}
           subsidyReceivedDate={customer.subsidyReceivedDate}
-          onSubsidyMetaChange={(fields) => run(() => updateSubsidyMeta(customer.id, fields))}
+          onSave={(payload) => handleSaveCategory('pmSuryaghar', payload)}
+          saving={busy}
         />
       )}
 
@@ -294,7 +325,13 @@ export default function CustomerDetail() {
             <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
               <div className="sm:w-48">
                 <label className="ui-label">Type</label>
-                <select value={docType} onChange={(e) => setDocType(e.target.value)}>
+                <select
+                  value={docType}
+                  onChange={(e) => {
+                    setDocType(e.target.value)
+                    if (e.target.value !== 'Other') setDocCustomName('')
+                  }}
+                >
                   {DOCUMENT_TYPES.map((t) => (
                     <option key={t} value={t}>
                       {t}
@@ -302,12 +339,25 @@ export default function CustomerDetail() {
                   ))}
                 </select>
               </div>
+              {docType === 'Other' && (
+                <div className="flex-1">
+                  <label className="ui-label">Document name</label>
+                  <input
+                    value={docCustomName}
+                    onChange={(e) => setDocCustomName(e.target.value)}
+                    placeholder="e.g. PAN card, NOC, Agreement"
+                  />
+                </div>
+              )}
               <label className="ui-btn-primary cursor-pointer">
                 <IconPlus className="h-4 w-4" />
                 Choose file
                 <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png" onChange={handleDocUpload} />
               </label>
             </div>
+            {docType === 'Other' && (
+              <p className="mt-2 text-xs text-ink-muted">Type the document name, then choose the file to upload.</p>
+            )}
           </div>
 
           <div className="ui-surface overflow-hidden">
@@ -360,16 +410,27 @@ export default function CustomerDetail() {
 
           <div className="ui-surface overflow-hidden">
             <div className="divide-y divide-slate-100">
-              {(customer.payments || []).map((p) => (
+              {paymentEntries.map((p) => (
                 <div key={p.id} className="flex items-center justify-between gap-3 px-5 py-3.5 text-sm">
                   <span className="font-bold text-ink">&#8377;{p.amount.toLocaleString('en-IN')}</span>
-                  <span className="rounded-lg bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-700">
+                  <span
+                    className={`rounded-lg px-2 py-1 text-xs font-semibold ${
+                      p.derivedFromFinance
+                        ? 'bg-green-50 text-green-700'
+                        : 'bg-blue-50 text-blue-700'
+                    }`}
+                  >
                     {p.mode}
                   </span>
-                  <span className="text-ink-soft">{p.date}</span>
+                  <span className="text-right text-ink-soft">
+                    {p.date}
+                    {p.derivedFromFinance && (
+                      <span className="block text-[10px] text-green-700">From Finance</span>
+                    )}
+                  </span>
                 </div>
               ))}
-              {(customer.payments || []).length === 0 && (
+              {paymentEntries.length === 0 && (
                 <div className="px-5 py-10 text-center text-sm text-ink-soft">No payments recorded yet.</div>
               )}
             </div>

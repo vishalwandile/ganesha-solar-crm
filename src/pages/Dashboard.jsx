@@ -4,6 +4,7 @@ import Layout from '../components/Layout'
 import StatusBadge from '../components/StatusBadge'
 import { IconPlus, IconSearch } from '../components/Icons'
 import { useCrm } from '../context/CrmContext'
+import { hasFeature } from '../data/features'
 import { OVERALL_STATUSES, CATEGORY_DEFS, getCategoryStatus } from '../data/mockData'
 
 function currentStageLabel(customer) {
@@ -21,12 +22,11 @@ const STAT_STYLES = {
   New: 'ui-stat-slate',
   'In progress': 'ui-stat-blue',
   Completed: 'ui-stat-green',
-  'On hold': 'ui-stat-orange',
 }
 
 export default function Dashboard() {
   const navigate = useNavigate()
-  const { loadDashboard, dashboard, quickLookup, refreshCustomers, customers } = useCrm()
+  const { loadDashboard, dashboard, quickLookup, sessionUser } = useCrm()
   const [query, setQuery] = useState('')
   const [quickMatch, setQuickMatch] = useState(null)
   const [lookupMsg, setLookupMsg] = useState('')
@@ -36,7 +36,7 @@ export default function Dashboard() {
     let alive = true
     ;(async () => {
       try {
-        await Promise.all([loadDashboard(), refreshCustomers()])
+        await loadDashboard()
       } finally {
         if (alive) setLoading(false)
       }
@@ -44,7 +44,7 @@ export default function Dashboard() {
     return () => {
       alive = false
     }
-  }, [loadDashboard, refreshCustomers])
+  }, [loadDashboard])
 
   useEffect(() => {
     const q = query.trim()
@@ -74,12 +74,14 @@ export default function Dashboard() {
         <p className="text-sm text-ink-muted">
           {loading
             ? 'Loading…'
-            : `Welcome back — ${dashboard.total || customers.length} customers in the pipeline.`}
+            : `Welcome back — ${dashboard.total} active customers in the pipeline.`}
         </p>
-        <Link to="/customers/new" className="ui-btn-primary">
-          <IconPlus className="h-4 w-4" />
-          Add customer
-        </Link>
+        {hasFeature(sessionUser, 'createCustomer') && (
+          <Link to="/customers/new" className="ui-btn-primary">
+            <IconPlus className="h-4 w-4" />
+            Add customer
+          </Link>
+        )}
       </div>
 
       <div className="ui-surface p-5">
@@ -89,13 +91,13 @@ export default function Dashboard() {
           </span>
           <div>
             <div className="text-sm font-bold text-ink">Quick status check</div>
-            <div className="text-xs text-ink-muted">Look up by consumer number or mobile</div>
+            <div className="text-xs text-ink-muted">Look up by consumer number</div>
           </div>
         </div>
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="e.g. CN-104822 or 9820211345"
+          placeholder="e.g. CN-104822"
           className="max-w-lg"
         />
         {quickMatch && (
@@ -120,7 +122,7 @@ export default function Dashboard() {
             Total customers
           </div>
           <div className="text-3xl font-extrabold tracking-tight text-ink">
-            {dashboard.total ?? customers.length}
+            {dashboard.total}
           </div>
         </div>
         {OVERALL_STATUSES.map((status) => (
@@ -133,6 +135,14 @@ export default function Dashboard() {
             </div>
           </div>
         ))}
+        <div className="ui-stat ui-stat-slate">
+          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-muted">
+            Inactive
+          </div>
+          <div className="text-3xl font-extrabold tracking-tight text-ink">
+            {dashboard.inactive || 0}
+          </div>
+        </div>
       </div>
 
       <div className="ui-surface overflow-hidden">

@@ -5,7 +5,7 @@ const COLOR_MAP = {
   'In progress': 'bg-blue-50 text-blue-700 ring-blue-200',
   'Request submitted': 'bg-blue-50 text-blue-700 ring-blue-200',
   Completed: 'bg-green-50 text-green-700 ring-green-200',
-  'On hold': 'bg-orange-50 text-orange-800 ring-orange-200',
+  Inactive: 'bg-slate-200 text-slate-700 ring-slate-300',
   Rejected: 'bg-red-50 text-red-700 ring-red-200',
   Approved: 'bg-green-50 text-green-700 ring-green-200',
   Yes: 'bg-green-50 text-green-700 ring-green-200',

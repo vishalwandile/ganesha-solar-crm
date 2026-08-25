@@ -10,6 +10,7 @@ import {
   signToken,
 } from '../middleware/auth.js'
 import { toFeCategory } from '../lib/keys.js'
+import { resolveFeatures } from '../lib/features.js'
 
 const router = Router()
 
@@ -23,7 +24,8 @@ router.post(
   asyncHandler(async (req, res) => {
     const body = loginSchema.parse(req.body)
     const { rows } = await query(
-      `select id, name, username, password_hash, team, is_admin from users where username = $1`,
+      `select id, name, username, password_hash, team, is_admin, features
+       from users where username = $1 and is_active = true`,
       [body.username.trim()]
     )
     const user = rows[0]
@@ -35,19 +37,23 @@ router.post(
     const token = signToken(user)
     setAuthCookie(res, token)
 
-    const perms = await query(
-      `select category, can_edit from user_category_permissions where user_id = $1`,
-      [user.id]
-    )
+    const [perms, unread] = await Promise.all([
+      query(`select category, can_edit from user_category_permissions where user_id = $1`, [
+        user.id,
+      ]),
+      query(`select count(*)::int as count from notifications where is_read = false`),
+    ])
 
     res.json({
       token,
+      unreadNotificationCount: unread.rows[0].count,
       user: {
         id: user.id,
         name: user.name,
         username: user.username,
         team: user.team,
         isAdmin: user.is_admin,
+        features: resolveFeatures(user),
         permissions: perms.rows.map((p) => ({
           category: toFeCategory(p.category),
           canEdit: p.can_edit,
@@ -66,17 +72,21 @@ router.get(
   '/me',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const perms = await query(
-      `select category, can_edit from user_category_permissions where user_id = $1`,
-      [req.user.id]
-    )
+    const [perms, unread] = await Promise.all([
+      query(`select category, can_edit from user_category_permissions where user_id = $1`, [
+        req.user.id,
+      ]),
+      query(`select count(*)::int as count from notifications where is_read = false`),
+    ])
     res.json({
+      unreadNotificationCount: unread.rows[0].count,
       user: {
         id: req.user.id,
         name: req.user.name,
         username: req.user.username,
         team: req.user.team,
         isAdmin: req.user.is_admin,
+        features: resolveFeatures(req.user),
         permissions: perms.rows.map((p) => ({
           category: toFeCategory(p.category),
           canEdit: p.can_edit,

@@ -3,6 +3,7 @@ import Layout from '../components/Layout'
 import { IconPlus, IconTeam } from '../components/Icons'
 import { useCrm } from '../context/CrmContext'
 import { TEAMS, CATEGORY_DEFS } from '../data/mockData'
+import { FEATURES, defaultFeaturesForTeam } from '../data/features'
 
 const TEAM_COLORS = {
   Admin: 'bg-orange-50 text-orange-700 ring-orange-200',
@@ -13,40 +14,96 @@ const TEAM_COLORS = {
   Loan: 'bg-green-50 text-green-800 ring-green-200',
 }
 
-const EMPTY = {
-  name: '',
-  username: '',
-  password: '',
-  team: TEAMS[0],
-  permissionCategories: [],
+function emptyForm() {
+  return {
+    name: '',
+    username: '',
+    password: '',
+    team: TEAMS[0],
+    permissionCategories: [],
+    features: defaultFeaturesForTeam(TEAMS[0]),
+  }
+}
+
+function FeatureChecks({ selected, onToggle }) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {FEATURES.map((feature) => {
+        const checked = selected.includes(feature.key)
+        return (
+          <label
+            key={feature.key}
+            className={`cursor-pointer rounded-lg px-3 py-1.5 text-xs font-semibold ring-1 ${
+              checked
+                ? 'bg-blue-50 text-blue-700 ring-blue-200'
+                : 'bg-slate-50 text-ink-muted ring-slate-200'
+            }`}
+          >
+            <input
+              type="checkbox"
+              className="mr-1.5"
+              checked={checked}
+              onChange={() => onToggle(feature.key)}
+            />
+            {feature.label}
+          </label>
+        )
+      })}
+    </div>
+  )
+}
+
+function CategoryChecks({ selected, onToggle }) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {CATEGORY_DEFS.map((c) => {
+        const checked = selected.some((p) => p.category === c.key)
+        return (
+          <label
+            key={c.key}
+            className={`cursor-pointer rounded-lg px-3 py-1.5 text-xs font-semibold ring-1 ${
+              checked
+                ? 'bg-orange-50 text-orange-700 ring-orange-200'
+                : 'bg-slate-50 text-ink-muted ring-slate-200'
+            }`}
+          >
+            <input
+              type="checkbox"
+              className="mr-1.5"
+              checked={checked}
+              onChange={() => onToggle(c.key)}
+            />
+            {c.label}
+          </label>
+        )
+      })}
+    </div>
+  )
+}
+
+function toggleList(list, key) {
+  return list.includes(key) ? list.filter((item) => item !== key) : [...list, key]
+}
+
+function togglePerms(perms, category) {
+  const exists = perms.some((p) => p.category === category)
+  if (exists) return perms.filter((p) => p.category !== category)
+  return [...perms, { category, canEdit: true }]
 }
 
 export default function Users() {
-  const { users, refreshUsers, addUser, sessionUser } = useCrm()
+  const { users, refreshUsers, addUser, updateUserAccess, deleteUser, sessionUser } = useCrm()
   const [open, setOpen] = useState(false)
-  const [form, setForm] = useState(EMPTY)
+  const [form, setForm] = useState(emptyForm)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [editingId, setEditingId] = useState(null)
+  const [editFeatures, setEditFeatures] = useState([])
+  const [editPerms, setEditPerms] = useState([])
 
   useEffect(() => {
     refreshUsers().catch(() => {})
   }, [refreshUsers])
-
-  function togglePerm(category) {
-    setForm((f) => {
-      const exists = f.permissionCategories.some((p) => p.category === category)
-      if (exists) {
-        return {
-          ...f,
-          permissionCategories: f.permissionCategories.filter((p) => p.category !== category),
-        }
-      }
-      return {
-        ...f,
-        permissionCategories: [...f.permissionCategories, { category, canEdit: true }],
-      }
-    })
-  }
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -58,7 +115,7 @@ export default function Users() {
     setBusy(true)
     try {
       await addUser(form)
-      setForm(EMPTY)
+      setForm(emptyForm())
       setOpen(false)
     } catch (err) {
       setError(err.message || 'Failed to add user')
@@ -67,12 +124,34 @@ export default function Users() {
     }
   }
 
+  function startEdit(user) {
+    setEditingId(user.id)
+    setEditFeatures(user.isAdmin ? FEATURES.map((f) => f.key) : user.features || [])
+    setEditPerms(user.permissions || [])
+  }
+
+  async function saveAccess(user) {
+    setError('')
+    setBusy(true)
+    try {
+      await updateUserAccess(user.id, {
+        features: user.isAdmin ? FEATURES.map((f) => f.key) : editFeatures,
+        permissions: editPerms,
+      })
+      setEditingId(null)
+    } catch (err) {
+      setError(err.message || 'Failed to update access')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
-    <Layout title="Users & teams" subtitle="Manage access and edit permissions">
+    <Layout title="Users & teams" subtitle="Assign screens and category edit rights">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-sm text-ink-muted">
-          Admin assigns which categories each user can edit. Teams:{' '}
-          <span className="font-semibold text-ink">{TEAMS.join(', ')}</span>.
+          Features hide UI and APIs. Category permissions still control which pipeline stages a user can edit.
+          Teams: <span className="font-semibold text-ink">{TEAMS.join(', ')}</span>.
         </p>
         {sessionUser?.isAdmin && (
           <button type="button" className="ui-btn-primary shrink-0" onClick={() => setOpen((v) => !v)}>
@@ -113,7 +192,17 @@ export default function Users() {
             </div>
             <div>
               <label className="ui-label">Team</label>
-              <select value={form.team} onChange={(e) => setForm((f) => ({ ...f, team: e.target.value }))}>
+              <select
+                value={form.team}
+                onChange={(e) => {
+                  const team = e.target.value
+                  setForm((f) => ({
+                    ...f,
+                    team,
+                    features: defaultFeaturesForTeam(team),
+                  }))
+                }}
+              >
                 {TEAMS.map((t) => (
                   <option key={t} value={t}>
                     {t}
@@ -123,37 +212,32 @@ export default function Users() {
             </div>
           </div>
           <div>
+            <div className="ui-label">Screens & features</div>
+            <FeatureChecks
+              selected={form.features}
+              onToggle={(key) => setForm((f) => ({ ...f, features: toggleList(f.features, key) }))}
+            />
+          </div>
+          <div>
             <div className="ui-label">Edit permissions</div>
-            <div className="flex flex-wrap gap-2">
-              {CATEGORY_DEFS.map((c) => {
-                const checked = form.permissionCategories.some((p) => p.category === c.key)
-                return (
-                  <label
-                    key={c.key}
-                    className={`cursor-pointer rounded-lg px-3 py-1.5 text-xs font-semibold ring-1 ${
-                      checked
-                        ? 'bg-orange-50 text-orange-700 ring-orange-200'
-                        : 'bg-slate-50 text-ink-muted ring-slate-200'
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      className="mr-1.5"
-                      checked={checked}
-                      onChange={() => togglePerm(c.key)}
-                    />
-                    {c.label}
-                  </label>
-                )
-              })}
-            </div>
+            <CategoryChecks
+              selected={form.permissionCategories}
+              onToggle={(key) =>
+                setForm((f) => ({
+                  ...f,
+                  permissionCategories: togglePerms(f.permissionCategories, key),
+                }))
+              }
+            />
           </div>
           {error && <p className="text-xs font-medium text-red-600">{error}</p>}
           <button type="submit" className="ui-btn-primary" disabled={busy}>
-            {busy ? 'Saving…' : 'Save user'}
+            {busy ? 'Saving…' : 'Save'}
           </button>
         </form>
       )}
+
+      {error && !open && <p className="text-xs font-medium text-red-600">{error}</p>}
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {users.map((u) => (
@@ -183,9 +267,60 @@ export default function Users() {
             <div className="flex items-start gap-2 rounded-xl bg-slate-50 px-3 py-2.5">
               <IconTeam className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" />
               <p className="text-xs leading-relaxed text-ink-muted">
-                {u.permissionsLabel || 'View only'}
+                {(u.features || []).length
+                  ? FEATURES.filter((f) => (u.isAdmin ? true : (u.features || []).includes(f.key)))
+                      .map((f) => f.label)
+                      .join(', ')
+                  : 'No screens assigned'}
               </p>
             </div>
+            <p className="mt-2 text-xs text-ink-muted">Stages: {u.permissionsLabel || 'View only'}</p>
+            {sessionUser?.isAdmin && editingId === u.id && (
+              <div className="mt-3 space-y-3">
+                <div>
+                  <div className="ui-label">Screens & features</div>
+                  {u.isAdmin ? (
+                    <p className="text-xs text-ink-muted">Admin always has every feature.</p>
+                  ) : (
+                    <FeatureChecks selected={editFeatures} onToggle={(key) => setEditFeatures((prev) => toggleList(prev, key))} />
+                  )}
+                </div>
+                <div>
+                  <div className="ui-label">Edit permissions</div>
+                  <CategoryChecks selected={editPerms} onToggle={(key) => setEditPerms((prev) => togglePerms(prev, key))} />
+                </div>
+                <div className="flex gap-2">
+                  <button type="button" className="ui-btn-primary" disabled={busy} onClick={() => saveAccess(u)}>
+                    {busy ? 'Saving…' : 'Save access'}
+                  </button>
+                  <button type="button" className="ui-btn-secondary" onClick={() => setEditingId(null)}>
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+            {sessionUser?.isAdmin && editingId !== u.id && (
+              <button type="button" className="mt-3 mr-3 text-xs font-bold text-blue-700 hover:text-blue-800" onClick={() => startEdit(u)}>
+                Edit access
+              </button>
+            )}
+            {sessionUser?.isAdmin && u.id !== sessionUser.id && (
+              <button
+                type="button"
+                className="mt-3 text-xs font-bold text-red-600 hover:text-red-700"
+                onClick={async () => {
+                  if (!window.confirm(`Delete ${u.name}'s access? Their audit history will be kept.`)) return
+                  setError('')
+                  try {
+                    await deleteUser(u.id)
+                  } catch (err) {
+                    setError(err.message || 'Failed to delete user')
+                  }
+                }}
+              >
+                Delete user
+              </button>
+            )}
           </div>
         ))}
       </div>

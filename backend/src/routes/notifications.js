@@ -1,12 +1,25 @@
 import { Router } from 'express'
 import { query } from '../db.js'
 import { asyncHandler, HttpError } from '../middleware/error.js'
+import { requireFeature } from '../middleware/permissions.js'
 import { toFeCategory } from '../lib/keys.js'
 
 const router = Router()
 
 router.get(
+  '/unread-count',
+  requireFeature('notifications'),
+  asyncHandler(async (_req, res) => {
+    const { rows } = await query(
+      `select count(*)::int as count from notifications where is_read = false`
+    )
+    res.json({ count: rows[0].count })
+  })
+)
+
+router.get(
   '/',
+  requireFeature('notifications'),
   asyncHandler(async (_req, res) => {
     const { rows } = await query(
       `select n.*, c.name as customer_name
@@ -31,6 +44,7 @@ router.get(
 
 router.patch(
   '/read-all',
+  requireFeature('notifications'),
   asyncHandler(async (_req, res) => {
     await query(`update notifications set is_read = true where is_read = false`)
     res.json({ ok: true })
@@ -39,6 +53,7 @@ router.patch(
 
 router.patch(
   '/:id/read',
+  requireFeature('notifications'),
   asyncHandler(async (req, res) => {
     const { rows } = await query(
       `update notifications set is_read = true where id = $1 returning id`,

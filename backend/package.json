@@ -8,7 +8,8 @@
     "dev": "nodemon src/index.js",
     "start": "node src/index.js",
     "seed": "node src/scripts/seedAdmin.js",
-    "db:push": "node src/scripts/applySchema.js"
+    "db:push": "node src/scripts/applySchema.js",
+    "db:migrate": "node src/scripts/migrate.js"
   },
   "keywords": [],
   "author": "",

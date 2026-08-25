@@ -10,42 +10,61 @@ import {
   toFePaymentMode,
   toDbDocumentType,
   toFeDocumentType,
+  resolveDocumentType,
 } from '../lib/keys.js'
 import { calculateExpectedSubsidy, getCategoryStatus, parseCapacityKW } from '../lib/status.js'
 import { HttpError } from '../middleware/error.js'
 
+function toDateStr(value) {
+  if (!value) return null
+  if (typeof value === 'string') return value.slice(0, 10)
+  try {
+    return new Date(value).toISOString().slice(0, 10)
+  } catch {
+    return null
+  }
+}
+
+let categoryDefsCache = null
+
 export async function loadCategoryDefs() {
-  const cats = await query(
-    `select category, label, owner_team, is_optional, sort_order
-     from category_definitions order by sort_order`
-  )
-  const stages = await query(
-    `select category, sub_stage_key, label, sort_order, options
-     from stage_definitions order by category, sort_order`
+  if (categoryDefsCache) return categoryDefsCache
+  const { rows } = await query(
+    `select c.category, c.label as category_label, c.owner_team, c.is_optional,
+            c.sort_order as category_order, s.sub_stage_key, s.label as stage_label,
+            s.sort_order as stage_order, s.options
+     from category_definitions c
+     join stage_definitions s on s.category = c.category
+     order by c.sort_order, s.sort_order`
   )
 
-  return cats.rows.map((c) => ({
+  const categories = [...new Map(rows.map((row) => [row.category, row])).values()]
+  categoryDefsCache = categories.map((c) => ({
     key: toFeCategory(c.category),
     dbKey: c.category,
-    label: c.label,
+    label: c.category_label,
     owner: c.owner_team === 'Installation' ? 'Installation team' : c.owner_team,
     optional: c.is_optional,
-    subStages: stages.rows
+    subStages: rows
       .filter((s) => s.category === c.category)
       .map((s) => ({
         key: toFeSubStage(s.sub_stage_key),
         dbKey: s.sub_stage_key,
-        label: s.label,
+        label: s.stage_label,
         options: (s.options || []).map(toFeStatus),
         dbOptions: s.options || [],
       })),
   }))
+  return categoryDefsCache
 }
 
 function mapCustomerRow(row) {
   return {
     id: row.id,
     name: row.name,
+    firstName: row.first_name || '',
+    middleName: row.middle_name || '',
+    lastName: row.last_name || '',
     consumerNumber: row.consumer_number,
     mobile: row.mobile,
     email: row.email || '',
@@ -63,20 +82,17 @@ function mapCustomerRow(row) {
     subsidyAmount: row.subsidy_amount != null ? Number(row.subsidy_amount) : null,
     subsidyReceivedDate: row.subsidy_received_date || null,
     overallStatus: toFeStatus(row.overall_status),
+    isActive: row.is_active !== false,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
 }
 
 async function buildCategoriesPayload(customerId, defs) {
-  const catRows = await query(
-    `select * from customer_categories where customer_id = $1`,
-    [customerId]
-  )
-  const stageRows = await query(
-    `select * from customer_sub_stages where customer_id = $1`,
-    [customerId]
-  )
+  const [catRows, stageRows] = await Promise.all([
+    query(`select * from customer_categories where customer_id = $1`, [customerId]),
+    query(`select * from customer_sub_stages where customer_id = $1`, [customerId]),
+  ])
 
   const categories = {}
   const categoryUpdatedAt = {}
@@ -97,6 +113,7 @@ async function buildCategoriesPayload(customerId, defs) {
         (s) => s.category === def.dbKey && s.sub_stage_key === sub.dbKey
       )
       values[sub.key] = toFeStatus(row?.value ?? sub.options[0])
+      values[`${sub.key}Date`] = toDateStr(row?.stage_date)
     }
 
     if (cat.rejection_reason) values.rejectionReason = cat.rejection_reason
@@ -116,17 +133,32 @@ async function buildCategoriesPayload(customerId, defs) {
   return { categories, categoryUpdatedAt, categoryNotes, categoryStatuses }
 }
 
+function buildWorkflowCustomer(row, catPayload, defs) {
+  const base = mapCustomerRow(row)
+  const requiredForClosure = ['rooftopSolar', 'pmSuryaghar', 'installation']
+  const closureBlockers = requiredForClosure
+    .filter((key) => catPayload.categoryStatuses[key] !== 'Completed')
+    .map((key) => defs.find((def) => def.key === key)?.label || key)
+  return {
+    ...base,
+    ...catPayload,
+    closureReady: closureBlockers.length === 0,
+    closureBlockers,
+    expectedSubsidy: calculateExpectedSubsidy(base.solarCapacityKw),
+  }
+}
+
 export async function getCustomerById(id) {
   const { rows } = await query(`select * from customers where id = $1`, [id])
   if (!rows[0]) throw new HttpError(404, 'Customer not found')
 
   const defs = await loadCategoryDefs()
-  const base = mapCustomerRow(rows[0])
   const catPayload = await buildCategoriesPayload(id, defs)
+  const workflow = buildWorkflowCustomer(rows[0], catPayload, defs)
 
   const [docs, payments, photos, history] = await Promise.all([
     query(
-      `select id, doc_type, file_name, file_url, uploaded_at from documents
+      `select id, doc_type, custom_name, file_name, file_url, uploaded_at from documents
        where customer_id = $1 order by uploaded_at desc`,
       [id]
     ),
@@ -151,12 +183,11 @@ export async function getCustomerById(id) {
   ])
 
   return {
-    ...base,
-    ...catPayload,
-    expectedSubsidy: calculateExpectedSubsidy(base.solarCapacityKw),
+    ...workflow,
     documents: docs.rows.map((d) => ({
       id: d.id,
-      type: toFeDocumentType(d.doc_type),
+      type: d.custom_name || toFeDocumentType(d.doc_type),
+      customName: d.custom_name || null,
       fileName: d.file_name,
       fileUrl: d.file_url,
       uploadedAt: d.uploaded_at,
@@ -183,7 +214,10 @@ export async function getCustomerById(id) {
   }
 }
 
-export async function listCustomers(search) {
+export async function listCustomers(search, page = 1, pageSize = 20) {
+  const safePage = Math.max(1, Number(page) || 1)
+  const safePageSize = Math.min(100, Math.max(5, Number(pageSize) || 20))
+  const offset = (safePage - 1) * safePageSize
   const params = []
   let where = ''
   if (search?.trim()) {
@@ -193,11 +227,27 @@ export async function listCustomers(search) {
       or lower(consumer_number) like $1
       or replace(mobile, ' ', '') like $2`
   }
+  const limitParam = params.length + 1
+  const offsetParam = params.length + 2
+  params.push(safePageSize, offset)
   const { rows } = await query(
-    `select * from customers ${where} order by created_at desc`,
+    `select *, count(*) over()::int as total_count
+     from customers
+     ${where}
+     order by created_at desc, id desc
+     limit $${limitParam} offset $${offsetParam}`,
     params
   )
-  return rows.map(mapCustomerRow)
+  const total = rows[0]?.total_count || 0
+  return {
+    customers: rows.map(mapCustomerRow),
+    pagination: {
+      page: safePage,
+      pageSize: safePageSize,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / safePageSize)),
+    },
+  }
 }
 
 export async function quickLookup(q) {
@@ -218,7 +268,9 @@ export async function quickLookup(q) {
 async function ensureDefaultCategories(client, customerId, enableNameChange, userId) {
   const defs = await loadCategoryDefs()
   for (const def of defs) {
-    if (def.optional && !enableNameChange) continue
+    if (def.key === 'nameChange' && !enableNameChange) continue
+    if (def.key === 'finance') continue
+    if (def.optional && def.key !== 'nameChange') continue
 
     await client.query(
       `insert into customer_categories (customer_id, category, updated_by)
@@ -242,18 +294,26 @@ async function ensureDefaultCategories(client, customerId, enableNameChange, use
 export async function createCustomer(payload, user) {
   const capacity = parseCapacityKW(payload.solarCapacity || payload.solarCapacityKw)
   const enableNameChange = Boolean(payload.enableNameChange)
+  const firstName = payload.firstName.trim()
+  const middleName = (payload.middleName || '').trim()
+  const lastName = payload.lastName.trim()
+  const fullName = [firstName, middleName, lastName].filter(Boolean).join(' ')
 
   const customerId = await withTransaction(async (client) => {
     const { rows } = await client.query(
       `insert into customers (
-         name, consumer_number, mobile, email, address, village, taluka, district, pin,
+         first_name, middle_name, last_name, name,
+         consumer_number, mobile, email, address, village, taluka, district, pin,
          electricity_connection_no, solar_capacity_kw, solar_module, inverter, total_due,
          overall_status, created_by
        ) values (
-         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'New',$15
+         $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,'New',$18
        ) returning id`,
       [
-        payload.name.trim(),
+        firstName,
+        middleName || null,
+        lastName,
+        fullName,
         payload.consumerNumber.trim(),
         payload.mobile.trim(),
         payload.email || null,
@@ -292,6 +352,245 @@ export async function updateOverallStatus(customerId, overallStatus, user) {
     `insert into activity_log (customer_id, action, performed_by) values ($1, $2, $3)`,
     [customerId, `Overall status → ${toFeStatus(dbStatus)}`, user.id]
   )
+  return getCustomerById(customerId)
+}
+
+export async function saveCategory(customerId, categoryKey, payload, user) {
+  const customerState = await query(
+    `select * from customers where id = $1`,
+    [customerId]
+  )
+  if (!customerState.rows[0]) throw new HttpError(404, 'Customer not found')
+  if (!customerState.rows[0].is_active) {
+    throw new HttpError(409, 'Reactivate this customer before updating pipeline stages')
+  }
+
+  const defs = await loadCategoryDefs()
+  const def = defs.find((d) => d.key === categoryKey || d.dbKey === categoryKey)
+  if (!def) throw new HttpError(404, 'Unknown category')
+
+  const subStages = Array.isArray(payload.subStages) ? payload.subStages : []
+  const rejectionReason = payload.rejectionReason
+  const notes = payload.notes
+  const extra = payload.extra || {}
+
+  for (const item of subStages) {
+    const sub = def.subStages.find((s) => s.key === item.key || s.dbKey === item.key)
+    if (!sub) throw new HttpError(400, `Unknown sub-stage: ${item.key}`)
+    const feValue = toFeStatus(item.value)
+    if (!sub.options.includes(feValue) && !sub.dbOptions.includes(item.value)) {
+      throw new HttpError(400, `Invalid status "${item.value}" for ${sub.label}`, {
+        allowed: sub.options,
+      })
+    }
+    if (toDbStatus(feValue) === 'Rejected' && !(rejectionReason || '').trim()) {
+      throw new HttpError(400, 'Rejection reason is required when status is Rejected')
+    }
+  }
+
+  await query(
+    `insert into customer_categories (customer_id, category, updated_by)
+     values ($1, $2, $3)
+     on conflict (customer_id, category) do nothing`,
+    [customerId, def.dbKey, user.id]
+  )
+
+  const before = await buildCategoriesPayload(customerId, defs)
+  const beforeStatus = before.categoryStatuses[def.key]
+  const closesProject =
+    def.key === 'closure' &&
+    subStages.some(
+      (item) =>
+        (item.key === 'projectClosed' || item.key === 'project_closed') &&
+        toFeStatus(item.value) === 'Yes'
+    )
+
+  if (closesProject) {
+    const requiredForClosure = ['rooftopSolar', 'pmSuryaghar', 'installation']
+    const blockers = requiredForClosure
+      .filter((key) => before.categoryStatuses[key] !== 'Completed')
+      .map((key) => defs.find((item) => item.key === key)?.label || key)
+    if (blockers.length) {
+      throw new HttpError(
+        409,
+        `Complete these stages before closure: ${blockers.join(', ')}`,
+        { blockers }
+      )
+    }
+  }
+
+  const beforeValues = before.categories[def.key] || {}
+  const stageChanged = subStages.some((item) => {
+    const sub = def.subStages.find((candidate) => candidate.key === item.key || candidate.dbKey === item.key)
+    return (
+      toFeStatus(item.value) !== beforeValues[sub.key] ||
+      (toDateStr(item.date) || null) !== (beforeValues[`${sub.key}Date`] || null)
+    )
+  })
+  const notesChanged =
+    payload.notes !== undefined &&
+    (payload.notes || '') !== (before.categoryNotes[def.key] || '')
+  const rejectionChanged =
+    payload.rejectionReason !== undefined &&
+    (payload.rejectionReason || '') !== (beforeValues.rejectionReason || '')
+  const extraChanged = Object.entries(extra).some(([key, value]) => {
+    const current = beforeValues[key] ?? null
+    return (value ?? null) !== current
+  })
+  const subsidyChanged =
+    def.key === 'pmSuryaghar' &&
+    ((payload.subsidyAmount !== undefined &&
+      (payload.subsidyAmount == null ? null : Number(payload.subsidyAmount)) !==
+        (customerState.rows[0].subsidy_amount == null
+          ? null
+          : Number(customerState.rows[0].subsidy_amount))) ||
+      (payload.subsidyReceivedDate !== undefined &&
+        (payload.subsidyReceivedDate || null) !==
+          toDateStr(customerState.rows[0].subsidy_received_date)))
+  const startsPipeline =
+    customerState.rows[0].overall_status === 'New' &&
+    ['nameChange', 'rooftopSolar'].includes(def.key) &&
+    subStages.length > 0
+
+  if (
+    !stageChanged &&
+    !notesChanged &&
+    !rejectionChanged &&
+    !extraChanged &&
+    !subsidyChanged &&
+    !startsPipeline
+  ) {
+    return {
+      customer: buildWorkflowCustomer(customerState.rows[0], before, defs),
+      notificationCreated: false,
+    }
+  }
+
+  await withTransaction(async (client) => {
+    for (const item of subStages) {
+      const sub = def.subStages.find((s) => s.key === item.key || s.dbKey === item.key)
+      const dbValue = toDbStatus(toFeStatus(item.value))
+      const stageDate = item.date ? item.date : null
+      await client.query(
+        `insert into customer_sub_stages (customer_id, category, sub_stage_key, value, stage_date, updated_by)
+         values ($1, $2, $3, $4, $5, $6)
+         on conflict (customer_id, category, sub_stage_key)
+         do update set
+           value = excluded.value,
+           stage_date = excluded.stage_date,
+           updated_by = excluded.updated_by,
+           updated_at = now()`,
+        [customerId, def.dbKey, sub.dbKey, dbValue, stageDate, user.id]
+      )
+    }
+
+    const extraMapped = {}
+    if (extra.bankName != null) extraMapped.bank_name = extra.bankName
+    if (extra.loanAmount != null) extraMapped.loan_amount = extra.loanAmount
+    if (extra.amountReceived != null) extraMapped.amount_received = extra.amountReceived
+    if (extra.receivedDate != null) extraMapped.received_date = extra.receivedDate
+
+    await client.query(
+      `update customer_categories
+       set notes = coalesce($1, notes),
+           rejection_reason = coalesce($2, rejection_reason),
+           extra = case when $3::jsonb = '{}'::jsonb then extra else extra || $3::jsonb end,
+           updated_by = $4,
+           updated_at = now()
+       where customer_id = $5 and category = $6`,
+      [
+        notes ?? null,
+        rejectionReason ?? null,
+        JSON.stringify(extraMapped),
+        user.id,
+        customerId,
+        def.dbKey,
+      ]
+    )
+
+    await client.query(
+      `insert into activity_log (customer_id, action, performed_by) values ($1, $2, $3)`,
+      [customerId, `${def.label} saved`, user.id]
+    )
+  })
+
+  if (def.key === 'pmSuryaghar' && (payload.subsidyAmount !== undefined || payload.subsidyReceivedDate !== undefined)) {
+    await query(
+      `update customers
+       set subsidy_amount = coalesce($1, subsidy_amount),
+           subsidy_received_date = coalesce($2, subsidy_received_date)
+       where id = $3`,
+      [
+        payload.subsidyAmount === undefined || payload.subsidyAmount === null
+          ? null
+          : Number(payload.subsidyAmount),
+        payload.subsidyReceivedDate || null,
+        customerId,
+      ]
+    )
+  }
+
+  if (closesProject) {
+    await query(`update customers set overall_status = 'Completed' where id = $1`, [customerId])
+  } else if (def.key === 'closure' && subStages.some((item) => toFeStatus(item.value) === 'No')) {
+    await query(
+      `update customers set overall_status = 'In Progress'
+       where id = $1 and overall_status = 'Completed'`,
+      [customerId]
+    )
+  } else if (['nameChange', 'rooftopSolar'].includes(def.key) && subStages.length > 0) {
+    await query(
+      `update customers set overall_status = 'In Progress'
+       where id = $1 and overall_status = 'New'`,
+      [customerId]
+    )
+  }
+
+  const after = await buildCategoriesPayload(customerId, defs)
+  const afterStatus = after.categoryStatuses[def.key]
+  let notificationCreated = false
+  if (beforeStatus !== afterStatus) {
+    await query(
+      `insert into notifications (customer_id, category, message)
+       values ($1, $2, $3)`,
+      [
+        customerId,
+        def.dbKey,
+        `${customerState.rows[0].name || 'Customer'}: ${def.label} → ${afterStatus}`,
+      ]
+    )
+    notificationCreated = true
+  }
+
+  const updatedCustomer = await query(`select * from customers where id = $1`, [customerId])
+  return {
+    customer: buildWorkflowCustomer(updatedCustomer.rows[0], after, defs),
+    notificationCreated,
+  }
+}
+
+export async function setCustomerActive(customerId, isActive, user) {
+  const { rows } = await query(
+    `select id, overall_status, is_active from customers where id = $1`,
+    [customerId]
+  )
+  const customer = rows[0]
+  if (!customer) throw new HttpError(404, 'Customer not found')
+  if (!isActive && customer.overall_status === 'Completed') {
+    throw new HttpError(409, 'Completed customers cannot be marked inactive')
+  }
+  if (customer.is_active === isActive) return getCustomerById(customerId)
+
+  await withTransaction(async (client) => {
+    await client.query(
+      `update customers set is_active = $1, updated_at = now() where id = $2`,
+      [isActive, customerId]
+    )
+    await client.query(
+      `insert into activity_log (customer_id, action, performed_by) values ($1, $2, $3)`,
+      [customerId, isActive ? 'Customer reactivated' : 'Customer marked inactive', user.id]
+    )
+  })
   return getCustomerById(customerId)
 }
 
@@ -507,19 +806,21 @@ export async function listPayments(customerId) {
   }))
 }
 
-export async function addDocument(customerId, { type, fileName, fileUrl }, user) {
+export async function addDocument(customerId, { type, customName, fileName, fileUrl }, user) {
+  const resolved = resolveDocumentType(type, customName)
   const { rows } = await query(
-    `insert into documents (customer_id, doc_type, file_name, file_url, uploaded_by)
-     values ($1, $2, $3, $4, $5) returning *`,
-    [customerId, toDbDocumentType(type), fileName, fileUrl, user.id]
+    `insert into documents (customer_id, doc_type, custom_name, file_name, file_url, uploaded_by)
+     values ($1, $2, $3, $4, $5, $6) returning *`,
+    [customerId, resolved.docType, resolved.customName, fileName, fileUrl, user.id]
   )
   await query(
     `insert into activity_log (customer_id, action, performed_by) values ($1, $2, $3)`,
-    [customerId, `Document uploaded: ${toFeDocumentType(type)}`, user.id]
+    [customerId, `Document uploaded: ${resolved.customName || toFeDocumentType(resolved.docType)}`, user.id]
   )
   return {
     id: rows[0].id,
-    type: toFeDocumentType(rows[0].doc_type),
+    type: rows[0].custom_name || toFeDocumentType(rows[0].doc_type),
+    customName: rows[0].custom_name || null,
     fileName: rows[0].file_name,
     fileUrl: rows[0].file_url,
     uploadedAt: rows[0].uploaded_at,
@@ -564,21 +865,25 @@ export async function updateSubsidyMeta(customerId, { subsidyAmount, subsidyRece
 }
 
 export async function getDashboardSummary() {
-  const total = await query(`select count(*)::int as count from customers`)
-  const byStatus = await query(
-    `select overall_status, count(*)::int as count
-     from customers group by overall_status`
+  const { rows } = await query(
+    `select
+       count(*) filter (where is_active = true)::int as total,
+       count(*) filter (where is_active = false)::int as inactive,
+       count(*) filter (where is_active = true and overall_status = 'New')::int as new_count,
+       count(*) filter (where is_active = true and overall_status = 'In Progress')::int as progress_count,
+       count(*) filter (where is_active = true and overall_status = 'Completed')::int as completed_count
+     from customers`
   )
-  const counts = {
-    New: 0,
-    'In progress': 0,
-    Completed: 0,
-    'On hold': 0,
+  const summary = rows[0]
+  return {
+    total: summary.total,
+    inactive: summary.inactive,
+    counts: {
+      New: summary.new_count,
+      'In progress': summary.progress_count,
+      Completed: summary.completed_count,
+    },
   }
-  for (const row of byStatus.rows) {
-    counts[toFeStatus(row.overall_status)] = row.count
-  }
-  return { total: total.rows[0].count, counts }
 }
 
 export async function getRecentActivity(limit = 10) {

@@ -15,7 +15,7 @@ create extension if not exists "pgcrypto"; -- for gen_random_uuid()
 -- ============================================================
 create type team_name as enum ('Admin', 'Installation', 'Sales', 'Office', 'Account', 'Loan');
 
-create type overall_status as enum ('New', 'In Progress', 'Completed', 'On Hold');
+create type overall_status as enum ('New', 'In Progress', 'Completed');
 
 create type category_key as enum (
   'name_change',
@@ -28,7 +28,7 @@ create type category_key as enum (
 
 create type payment_mode as enum ('Cash', 'Bank Transfer', 'Cheque', 'UPI');
 
-create type document_type as enum ('Aadhaar', 'Electricity Bill', 'Bank Passbook');
+create type document_type as enum ('Aadhaar', 'Electricity Bill', 'Bank Passbook', 'Other');
 
 -- ============================================================
 -- 2. Users & teams
@@ -40,8 +40,18 @@ create table users (
   password_hash text not null,
   team team_name not null,
   is_admin boolean not null default false,
+  is_active boolean not null default true,
+  features jsonb not null default '[]'::jsonb,
   created_at timestamptz not null default now()
 );
+
+create table teams (
+  name team_name primary key,
+  created_at timestamptz not null default now()
+);
+
+insert into teams (name) values
+  ('Admin'), ('Installation'), ('Sales'), ('Office'), ('Account'), ('Loan');
 
 -- Per-user, per-category edit permission. Admin assigns these individually
 -- (per the "flexible: admin assigns who can edit what" decision).
@@ -80,7 +90,7 @@ insert into category_definitions (category, label, owner_team, is_optional, sort
   ('name_change',    'Name Change',    'Office',             true,  1),
   ('rooftop_solar',  'Rooftop Solar',  'Office',             false, 2),
   ('pm_suryaghar',   'PM Suryaghar',   'Office',             false, 3),
-  ('finance',        'Finance',        'Account',            false, 4),
+  ('finance',        'Finance',        'Account',            true,  4),
   ('installation',   'Installation',   'Installation',       false, 5),
   ('closure',        'Closure',        'Office',             false, 6);
 
@@ -115,6 +125,9 @@ insert into stage_definitions (category, sub_stage_key, label, sort_order, optio
 -- ============================================================
 create table customers (
   id uuid primary key default gen_random_uuid(),
+  first_name text not null,
+  middle_name text,
+  last_name text not null,
   name text not null,
   consumer_number text not null unique,
   mobile text not null,
@@ -132,6 +145,7 @@ create table customers (
   subsidy_amount numeric(12,2),
   subsidy_received_date date,
   overall_status overall_status not null default 'New',
+  is_active boolean not null default true,
   created_by uuid references users(id),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -171,6 +185,7 @@ create table customer_sub_stages (
   category category_key not null,
   sub_stage_key text not null,
   value text not null,
+  stage_date date,
   updated_at timestamptz not null default now(),
   updated_by uuid references users(id),
   unique (customer_id, category, sub_stage_key),
@@ -186,6 +201,7 @@ create table documents (
   id uuid primary key default gen_random_uuid(),
   customer_id uuid not null references customers(id) on delete cascade,
   doc_type document_type not null,
+  custom_name text,
   file_name text not null,
   file_url text not null, -- Supabase Storage object path/URL
   uploaded_by uuid references users(id),

@@ -4,6 +4,7 @@ import Layout from '../components/Layout'
 import { IconDoc } from '../components/Icons'
 import { useCrm } from '../context/CrmContext'
 import { DOCUMENT_TYPES } from '../data/mockData'
+import { hasFeature } from '../data/features'
 
 const FIELD_GROUPS = [
   {
@@ -11,7 +12,9 @@ const FIELD_GROUPS = [
     hint: 'Primary contact and consumer identity',
     accent: 'from-orange-500 to-orange-400',
     fields: [
-      { key: 'name', label: 'Consumer name', required: true },
+      { key: 'firstName', label: 'First name', required: true },
+      { key: 'middleName', label: 'Middle name' },
+      { key: 'lastName', label: 'Last name', required: true },
       { key: 'consumerNumber', label: 'Consumer number', required: true },
       { key: 'mobile', label: 'Mobile number', required: true },
       { key: 'email', label: 'Email' },
@@ -45,11 +48,15 @@ const FIELD_GROUPS = [
 
 export default function CreateCustomer() {
   const navigate = useNavigate()
-  const { createCustomer } = useCrm()
+  const { createCustomer, sessionUser } = useCrm()
+  const canUploadDocs = hasFeature(sessionUser, 'documents')
   const [form, setForm] = useState({ enableNameChange: false })
   const [files, setFiles] = useState({})
+  const [otherDocName, setOtherDocName] = useState('')
   const [error, setError] = useState('')
   const [saved, setSaved] = useState(false)
+
+  const standardDocs = DOCUMENT_TYPES.filter((t) => t !== 'Other')
 
   function handleChange(key, value) {
     setForm((prev) => ({ ...prev, [key]: value }))
@@ -59,14 +66,28 @@ export default function CreateCustomer() {
     e.preventDefault()
     setError('')
 
-    if (!form.name?.trim() || !form.consumerNumber?.trim() || !form.mobile?.trim()) {
-      setError('Name, consumer number, and mobile are required.')
+    if (
+      !form.firstName?.trim() ||
+      !form.lastName?.trim() ||
+      !form.consumerNumber?.trim() ||
+      !form.mobile?.trim()
+    ) {
+      setError('First name, last name, consumer number, and mobile are required.')
+      return
+    }
+
+    if (files.Other && !otherDocName.trim()) {
+      setError('Enter a name for the other document.')
       return
     }
 
     setSaved(true)
     try {
-      const created = await createCustomer(form, files)
+      const uploadFiles = { ...files }
+      if (files.Other) {
+        uploadFiles.Other = { file: files.Other, name: otherDocName.trim() }
+      }
+      const created = await createCustomer(form, canUploadDocs ? uploadFiles : {})
       navigate(`/customers/${created.id}`)
     } catch (err) {
       setSaved(false)
@@ -122,13 +143,14 @@ export default function CreateCustomer() {
           </label>
         </div>
 
+        {canUploadDocs && (
         <div className="ui-surface overflow-hidden">
           <div className="border-b border-slate-100 px-5 py-4">
             <div className="text-sm font-bold text-ink">Documents</div>
-            <div className="text-xs text-ink-muted">Aadhaar, electricity bill, bank passbook</div>
+            <div className="text-xs text-ink-muted">Aadhaar, electricity bill, bank passbook, or any other document</div>
           </div>
           <div className="grid grid-cols-1 gap-3 p-5 sm:grid-cols-3">
-            {DOCUMENT_TYPES.map((doc) => (
+            {standardDocs.map((doc) => (
               <label
                 key={doc}
                 className={`flex cursor-pointer flex-col items-center gap-2 rounded-2xl border border-dashed px-3 py-6 text-center transition ${
@@ -155,7 +177,34 @@ export default function CreateCustomer() {
               </label>
             ))}
           </div>
+          <div className="border-t border-slate-100 p-5">
+            <div className="mb-2 text-xs font-semibold text-ink">Other document</div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div>
+                <label className="ui-label">Document name</label>
+                <input
+                  value={otherDocName}
+                  onChange={(e) => setOtherDocName(e.target.value)}
+                  placeholder="e.g. PAN card, NOC"
+                />
+              </div>
+              <div>
+                <label className="ui-label">File</label>
+                <input
+                  type="file"
+                  accept=".pdf,.jpg,.jpeg,.png"
+                  onChange={(e) =>
+                    setFiles((prev) => ({ ...prev, Other: e.target.files?.[0] || null }))
+                  }
+                />
+                {files.Other && (
+                  <p className="mt-1 text-[11px] text-ink-soft">{files.Other.name}</p>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
+        )}
 
         {error && (
           <p className="rounded-xl bg-red-50 px-4 py-3 text-sm font-medium text-red-700 ring-1 ring-red-100">
@@ -165,7 +214,7 @@ export default function CreateCustomer() {
 
         <div className="flex flex-wrap items-center gap-3">
           <button type="submit" className="ui-btn-primary" disabled={saved}>
-            {saved ? 'Saving…' : 'Save customer'}
+            {saved ? 'Saving…' : 'Save'}
           </button>
           <button type="button" onClick={() => navigate('/customers')} className="ui-btn-secondary">
             Cancel

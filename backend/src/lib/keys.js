@@ -97,3 +97,14 @@ export function toDbDocumentType(value) {
 export function toFeDocumentType(value) {
   return toFeStatus(value)
 }
+
+const KNOWN_DOC_TYPES = new Set(['Aadhaar', 'Electricity Bill', 'Bank Passbook', 'Other'])
+
+export function resolveDocumentType(type, customName) {
+  const mapped = toDbDocumentType(type)
+  if (mapped && KNOWN_DOC_TYPES.has(mapped) && mapped !== 'Other') {
+    return { docType: mapped, customName: null }
+  }
+  const name = (customName || (mapped !== 'Other' ? type : '') || '').trim()
+  return { docType: 'Other', customName: name || 'Other' }
+}

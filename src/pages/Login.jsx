@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useCrm } from '../context/CrmContext'
-import { IconSun } from '../components/Icons'
 
 export default function Login() {
   const { login } = useCrm()
@@ -42,8 +41,12 @@ export default function Login() {
         <div className="absolute inset-x-0 top-0 h-1.5 bg-gradient-to-r from-orange-500 via-blue-500 to-green-500" />
 
         <div className="mb-8 text-center">
-          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-orange-500 via-orange-400 to-green-500 text-white shadow-lift">
-            <IconSun className="h-7 w-7" />
+          <div className="mx-auto mb-4 flex h-24 w-28 items-center justify-center overflow-hidden rounded-2xl bg-white shadow-soft ring-1 ring-slate-200">
+            <img
+              src="/ganesha-solar-logo.png"
+              alt="Ganesha Solar logo"
+              className="h-full w-full object-contain"
+            />
           </div>
           <h1 className="text-2xl font-extrabold tracking-tight text-ink">Ganesha Solar</h1>
           <p className="mt-1 text-sm font-medium text-ink-muted">Sign in to Services CRM</p>
@@ -82,6 +85,9 @@ export default function Login() {
         <p className="mt-5 text-center text-xs text-ink-soft">
           Use seeded account <span className="font-semibold">vishal.wandile</span> /{' '}
           <span className="font-semibold">admin123</span>
+        </p>
+        <p className="mt-4 text-center text-[11px] text-ink-soft">
+          © {new Date().getFullYear()} Ganesha Solar Services. All rights reserved.
         </p>
       </form>
     </div>

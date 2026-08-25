@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import StatusBadge from './StatusBadge'
 import { CATEGORY_DEFS, calculateExpectedSubsidy, getPmSuryagharProgress, parseCapacityKW } from '../data/mockData'
 
@@ -13,27 +13,69 @@ const STAGE_HINTS = {
 
 const DONE = ['Completed', 'Claimed', 'Disbursed', 'Approved', 'Yes']
 
+function dateKey(subKey) {
+  return `${subKey}Date`
+}
+
 export default function PmSuryagharPortal({
   customer,
   data,
-  onChange,
   notes,
-  onNotesChange,
   subsidyAmount,
   subsidyReceivedDate,
-  onSubsidyMetaChange,
+  onSave,
+  saving,
 }) {
   const def = CATEGORY_DEFS.find((c) => c.key === 'pmSuryaghar')
-  const stageData =
-    data ||
-    Object.fromEntries(def.subStages.map((s) => [s.key, s.options[0]]))
-  const progress = getPmSuryagharProgress(stageData)
+  const initialDraft = useMemo(() => {
+    const source = data || {}
+    const values = {}
+    const dates = {}
+    def.subStages.forEach((sub) => {
+      values[sub.key] = source[sub.key] || sub.options[0]
+      dates[sub.key] = source[dateKey(sub.key)] || ''
+    })
+    return {
+      values,
+      dates,
+      notes: notes || '',
+      subsidyAmount: subsidyAmount ?? '',
+      subsidyReceivedDate: subsidyReceivedDate || '',
+    }
+  }, [def, data, notes, subsidyAmount, subsidyReceivedDate])
+
+  const [draft, setDraft] = useState(initialDraft)
+  const [savedMsg, setSavedMsg] = useState('')
+  const progress = getPmSuryagharProgress(draft.values)
   const estimate = calculateExpectedSubsidy(parseCapacityKW(customer.solarCapacity))
-  const [draftNotes, setDraftNotes] = useState(notes || '')
 
   useEffect(() => {
-    setDraftNotes(notes || '')
-  }, [notes])
+    setDraft(initialDraft)
+  }, [initialDraft])
+
+  async function handleStageSave(sub) {
+    setSavedMsg('')
+    const payload = {
+      subStages: [{
+        key: sub.key,
+        value: draft.values[sub.key],
+        date: draft.dates[sub.key] || null,
+      }],
+      notes: draft.notes,
+    }
+    if (sub.key === 'subsidy') {
+      payload.subsidyAmount =
+        draft.subsidyAmount === '' ? null : Number(draft.subsidyAmount)
+      payload.subsidyReceivedDate = draft.subsidyReceivedDate || null
+    }
+    try {
+      await onSave(payload)
+      setSavedMsg(sub.key)
+      setTimeout(() => setSavedMsg(''), 2000)
+    } catch {
+      /* parent surfaces the error */
+    }
+  }
 
   return (
     <div className="overflow-hidden rounded-3xl border border-blue-100 bg-white shadow-lift">
@@ -63,7 +105,9 @@ export default function PmSuryagharPortal({
 
         <div className="relative mt-5">
           <div className="mb-2 flex items-center justify-between text-xs font-semibold">
-            <span>{progress.done}/{progress.total} stages complete</span>
+            <span>
+              {progress.done}/{progress.total} stages complete
+            </span>
             <span>{progress.percent}%</span>
           </div>
           <div className="h-2.5 overflow-hidden rounded-full bg-white/20">
@@ -82,8 +126,18 @@ export default function PmSuryagharPortal({
       </div>
 
       <div className="space-y-3 p-4 sm:p-6">
+        <div className="rounded-2xl border border-slate-200 bg-white p-4">
+          <label className="ui-label">Portal follow-up notes</label>
+          <textarea
+            rows={2}
+            value={draft.notes}
+            onChange={(e) => setDraft((d) => ({ ...d, notes: e.target.value }))}
+            placeholder="Saved together with the stage you update"
+          />
+        </div>
+
         {def.subStages.map((sub, index) => {
-          const value = stageData[sub.key] || sub.options[0]
+          const value = draft.values[sub.key] || sub.options[0]
           const complete = DONE.includes(value)
           const isCurrent = progress.currentLabel === sub.label
 
@@ -98,41 +152,60 @@ export default function PmSuryagharPortal({
                     : 'border-slate-200 bg-slate-50/50'
               }`}
             >
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                <div className="flex min-w-0 items-start gap-3">
-                  <div
-                    className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-sm font-extrabold ${
-                      complete
-                        ? 'bg-green-500 text-white'
-                        : isCurrent
-                          ? 'bg-orange-500 text-white'
-                          : 'bg-white text-ink-muted ring-1 ring-slate-200'
-                    }`}
-                  >
-                    {complete ? '✓' : index + 1}
-                  </div>
-                  <div>
-                    <div className="text-sm font-bold text-ink">{sub.label}</div>
-                    <div className="mt-0.5 text-xs text-ink-muted">{STAGE_HINTS[sub.key]}</div>
-                    {sub.key === 'subsidy' && (
-                      <div className="mt-1 text-xs font-semibold text-blue-700">
-                        Est. ₹{estimate.toLocaleString('en-IN')}
-                      </div>
-                    )}
+              <div className="flex min-w-0 items-start gap-3">
+                <div
+                  className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-sm font-extrabold ${
+                    complete
+                      ? 'bg-green-500 text-white'
+                      : isCurrent
+                        ? 'bg-orange-500 text-white'
+                        : 'bg-white text-ink-muted ring-1 ring-slate-200'
+                  }`}
+                >
+                  {complete ? '✓' : index + 1}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-bold text-ink">{sub.label}</div>
+                  <div className="mt-0.5 text-xs text-ink-muted">{STAGE_HINTS[sub.key]}</div>
+                  {sub.key === 'subsidy' && (
+                    <div className="mt-1 text-xs font-semibold text-blue-700">
+                      Est. ₹{estimate.toLocaleString('en-IN')}
+                    </div>
+                  )}
+                  <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <div>
+                      <label className="ui-label">Status</label>
+                      <select
+                        value={value}
+                        onChange={(e) =>
+                          setDraft((d) => ({
+                            ...d,
+                            values: { ...d.values, [sub.key]: e.target.value },
+                          }))
+                        }
+                      >
+                        {sub.options.map((opt) => (
+                          <option key={opt} value={opt}>
+                            {opt}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="ui-label">Date</label>
+                      <input
+                        type="date"
+                        value={draft.dates[sub.key] || ''}
+                        onChange={(e) =>
+                          setDraft((d) => ({
+                            ...d,
+                            dates: { ...d.dates, [sub.key]: e.target.value },
+                          }))
+                        }
+                      />
+                    </div>
                   </div>
                 </div>
-
-                <select
-                  className="w-full lg:w-48"
-                  value={value}
-                  onChange={(e) => onChange(sub.key, e.target.value)}
-                >
-                  {sub.options.map((opt) => (
-                    <option key={opt} value={opt}>
-                      {opt}
-                    </option>
-                  ))}
-                </select>
               </div>
 
               {sub.key === 'subsidy' && (
@@ -142,40 +215,38 @@ export default function PmSuryagharPortal({
                     <input
                       type="number"
                       placeholder="e.g. 78000"
-                      value={subsidyAmount ?? ''}
-                      onChange={(e) =>
-                        onSubsidyMetaChange({
-                          subsidyAmount: e.target.value === '' ? null : Number(e.target.value),
-                        })
-                      }
+                      value={draft.subsidyAmount}
+                      onChange={(e) => setDraft((d) => ({ ...d, subsidyAmount: e.target.value }))}
                     />
                   </div>
                   <div>
                     <label className="ui-label">Subsidy received date</label>
                     <input
                       type="date"
-                      value={subsidyReceivedDate || ''}
+                      value={draft.subsidyReceivedDate}
                       onChange={(e) =>
-                        onSubsidyMetaChange({ subsidyReceivedDate: e.target.value || null })
+                        setDraft((d) => ({ ...d, subsidyReceivedDate: e.target.value }))
                       }
                     />
                   </div>
                 </div>
               )}
+              <div className="mt-3 flex items-center gap-3">
+                <button
+                  type="button"
+                  className="ui-btn-primary"
+                  disabled={saving}
+                  onClick={() => handleStageSave(sub)}
+                >
+                  {saving ? 'Saving…' : 'Save'}
+                </button>
+                {savedMsg === sub.key && (
+                  <span className="text-sm font-semibold text-green-600">Saved</span>
+                )}
+              </div>
             </div>
           )
         })}
-
-        <div className="rounded-2xl border border-slate-200 bg-white p-4">
-          <label className="ui-label">Portal follow-up notes</label>
-          <textarea
-            rows={2}
-            value={draftNotes}
-            onChange={(e) => setDraftNotes(e.target.value)}
-            onBlur={() => onNotesChange(draftNotes)}
-            placeholder="e.g. DISCOM inspection scheduled Friday · bank re-verification pending"
-          />
-        </div>
       </div>
     </div>
   )
