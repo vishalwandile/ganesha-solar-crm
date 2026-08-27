@@ -2,8 +2,11 @@
 alter table customer_sub_stages add column if not exists stage_date date;
 
 alter table documents add column if not exists custom_name text;
+alter table documents add column if not exists storage_path text;
+alter table photos add column if not exists storage_path text;
 alter table customers add column if not exists is_active boolean not null default true;
 alter table users add column if not exists is_active boolean not null default true;
+alter table users add column if not exists mobile text;
 alter table customers add column if not exists first_name text;
 alter table customers add column if not exists middle_name text;
 alter table customers add column if not exists last_name text;
@@ -49,20 +52,71 @@ values ('Admin'), ('Installation'), ('Sales'), ('Office'), ('Account'), ('Loan')
 on conflict (name) do nothing;
 
 update category_definitions set is_optional = true where category = 'finance';
-update customers set overall_status = 'In Progress' where overall_status = 'On Hold';
+-- 'On Hold' only exists on older databases; skip when the enum lacks it.
+do $$
+begin
+  if exists (
+    select 1 from pg_enum e
+    join pg_type t on t.oid = e.enumtypid
+    where t.typname = 'overall_status' and e.enumlabel = 'On Hold'
+  ) then
+    update customers
+    set overall_status = 'In Progress'
+    where overall_status::text = 'On Hold';
+  end if;
+end $$;
 
 alter table users add column if not exists features jsonb not null default '[]'::jsonb;
 update users
 set features = case
   when is_admin or team = 'Admin' then
-    '["dashboard","customers","createCustomer","statusTracking","pmSuryaghar","documents","payments","photos","history","notifications","users","inactiveCustomer"]'::jsonb
+    '["dashboard","customers","createCustomer","statusTracking","pmSuryaghar","documents","payments","users","inactiveCustomer"]'::jsonb
   when team = 'Office' then
-    '["dashboard","customers","createCustomer","statusTracking","pmSuryaghar","documents","photos","history","notifications"]'::jsonb
+    '["dashboard","customers","createCustomer","statusTracking","pmSuryaghar","documents"]'::jsonb
   when team in ('Account', 'Loan') then
-    '["dashboard","customers","statusTracking","payments","notifications"]'::jsonb
+    '["dashboard","customers","statusTracking","payments"]'::jsonb
   when team = 'Installation' then
-    '["dashboard","customers","statusTracking","photos","notifications"]'::jsonb
+    '["dashboard","customers","statusTracking","documents"]'::jsonb
   else
-    '["dashboard","customers","createCustomer","notifications"]'::jsonb
+    '["dashboard","customers","createCustomer"]'::jsonb
 end
 where features = '[]'::jsonb;
+
+update users
+set features = case
+  when features ? 'photos' and not features ? 'documents'
+    then (features - 'photos') || '["documents"]'::jsonb
+  else features - 'photos'
+end
+where features ? 'photos';
+
+-- Notification and history tracking are temporarily disabled.
+update users
+set features = (features - 'history') - 'notifications'
+where features ? 'history' or features ? 'notifications';
+
+-- Block PostgREST public access. The Node API (DATABASE_URL) still bypasses RLS.
+do $$
+declare
+  t text;
+begin
+  foreach t in array array[
+    'users',
+    'teams',
+    'user_category_permissions',
+    'stage_definitions',
+    'category_definitions',
+    'customers',
+    'customer_categories',
+    'customer_sub_stages',
+    'documents',
+    'photos',
+    'payments',
+    'activity_log',
+    'notifications'
+  ]
+  loop
+    execute format('alter table if exists public.%I enable row level security', t);
+    execute format('revoke all on table public.%I from anon, authenticated', t);
+  end loop;
+end $$;

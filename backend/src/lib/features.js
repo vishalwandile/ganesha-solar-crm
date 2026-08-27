@@ -6,9 +6,6 @@ export const FEATURE_KEYS = [
   'pmSuryaghar',
   'documents',
   'payments',
-  'photos',
-  'history',
-  'notifications',
   'users',
   'inactiveCustomer',
 ]
@@ -21,9 +18,6 @@ export const FEATURE_LABELS = {
   pmSuryaghar: 'PM Suryaghar',
   documents: 'Documents',
   payments: 'Payments',
-  photos: 'Photos',
-  history: 'History',
-  notifications: 'Notifications',
   users: 'Users & teams',
   inactiveCustomer: 'Mark customer inactive',
 }
@@ -37,14 +31,11 @@ const TEAM_DEFAULTS = {
     'statusTracking',
     'pmSuryaghar',
     'documents',
-    'photos',
-    'history',
-    'notifications',
   ],
-  Sales: ['dashboard', 'customers', 'createCustomer', 'notifications'],
-  Account: ['dashboard', 'customers', 'statusTracking', 'payments', 'notifications'],
-  Loan: ['dashboard', 'customers', 'statusTracking', 'payments', 'notifications'],
-  Installation: ['dashboard', 'customers', 'statusTracking', 'photos', 'notifications'],
+  Sales: ['dashboard', 'customers', 'createCustomer'],
+  Account: ['dashboard', 'customers', 'statusTracking', 'payments'],
+  Loan: ['dashboard', 'customers', 'statusTracking', 'payments'],
+  Installation: ['dashboard', 'customers', 'statusTracking', 'documents'],
 }
 
 export function defaultFeaturesForTeam(team) {
@@ -74,7 +65,5 @@ export function redactCustomer(customer, user) {
     next.totalPaid = 0
   }
   if (!hasFeature(user, 'documents')) next.documents = []
-  if (!hasFeature(user, 'photos')) next.photos = []
-  if (!hasFeature(user, 'history')) next.history = []
   return next
 }

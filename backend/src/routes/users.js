@@ -18,6 +18,7 @@ const permissionItem = z.object({
 const createUserSchema = z.object({
   name: z.string().min(1),
   username: z.string().min(1),
+  mobile: z.string().trim().regex(/^[6-9]\d{9}$/, 'Enter a valid 10-digit Indian mobile number'),
   password: z.string().min(6),
   team: z.enum(['Admin', 'Installation', 'Sales', 'Office', 'Account', 'Loan']),
   isAdmin: z.boolean().optional(),
@@ -28,6 +29,12 @@ const createUserSchema = z.object({
 const accessSchema = z.object({
   permissions: z.array(permissionItem).optional(),
   features: z.array(z.string()).optional(),
+  mobile: z
+    .union([
+      z.string().trim().regex(/^[6-9]\d{9}$/, 'Enter a valid 10-digit Indian mobile number'),
+      z.literal(''),
+    ])
+    .optional(),
 })
 
 function mapUser(row, permissions = []) {
@@ -35,6 +42,7 @@ function mapUser(row, permissions = []) {
     id: row.id,
     name: row.name,
     username: row.username,
+    mobile: row.mobile || '',
     team: row.team,
     isAdmin: row.is_admin,
     createdAt: row.created_at,
@@ -51,7 +59,7 @@ router.get(
   requireFeature('users'),
   asyncHandler(async (_req, res) => {
     const { rows } = await query(
-      `select id, name, username, team, is_admin, features, created_at
+      `select id, name, username, mobile, team, is_admin, features, created_at
        from users where is_active = true order by created_at`
     )
     const perms = await query(`select user_id, category, can_edit from user_category_permissions`)
@@ -79,10 +87,18 @@ router.post(
 
     const user = await withTransaction(async (client) => {
       const { rows } = await client.query(
-        `insert into users (name, username, password_hash, team, is_admin, features)
-         values ($1, $2, $3, $4, $5, $6::jsonb)
-         returning id, name, username, team, is_admin, features, created_at`,
-        [body.name.trim(), body.username.trim(), hash, body.team, isAdmin, JSON.stringify(features)]
+        `insert into users (name, username, mobile, password_hash, team, is_admin, features)
+         values ($1, $2, $3, $4, $5, $6, $7::jsonb)
+         returning id, name, username, mobile, team, is_admin, features, created_at`,
+        [
+          body.name.trim(),
+          body.username.trim(),
+          body.mobile,
+          hash,
+          body.team,
+          isAdmin,
+          JSON.stringify(features),
+        ]
       )
       const created = rows[0]
       for (const p of body.permissions || []) {
@@ -142,6 +158,12 @@ router.patch(
     if (!rows[0]) throw new HttpError(404, 'User not found')
 
     await withTransaction(async (client) => {
+      if (body.mobile !== undefined) {
+        await client.query(`update users set mobile = $2 where id = $1`, [
+          req.params.id,
+          body.mobile || null,
+        ])
+      }
       if (body.features) {
         const features = rows[0].is_admin
           ? sanitizeFeatures(defaultFeaturesForTeam('Admin'))

@@ -79,7 +79,7 @@ export default function Login() {
         )}
 
         <button type="submit" className="ui-btn-primary w-full py-3" disabled={busy}>
-          {busy ? 'Signing in…' : 'Sign in'}
+          Sign in
         </button>
 
         <p className="mt-5 text-center text-xs text-ink-soft">

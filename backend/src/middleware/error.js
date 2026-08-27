@@ -13,6 +13,9 @@ export function notFound(req, res, next) {
 export function errorHandler(err, req, res, next) {
   // eslint-disable-next-line no-unused-vars
   void next
+  if (err.code === 'LIMIT_FILE_SIZE') {
+    return res.status(400).json({ error: 'File must be 500 KB or smaller' })
+  }
   const status = err.status || 500
   const payload = {
     error: err.message || 'Internal server error',

@@ -156,28 +156,15 @@ export async function getCustomerById(id) {
   const catPayload = await buildCategoriesPayload(id, defs)
   const workflow = buildWorkflowCustomer(rows[0], catPayload, defs)
 
-  const [docs, payments, photos, history] = await Promise.all([
+  const [docs, payments] = await Promise.all([
     query(
-      `select id, doc_type, custom_name, file_name, file_url, uploaded_at from documents
+      `select id, doc_type, custom_name, file_name, file_url, storage_path, uploaded_at from documents
        where customer_id = $1 order by uploaded_at desc`,
       [id]
     ),
     query(
       `select id, amount, mode, paid_on, created_at from payments
        where customer_id = $1 order by paid_on desc, created_at desc`,
-      [id]
-    ),
-    query(
-      `select id, file_url, caption, uploaded_at from photos
-       where customer_id = $1 order by uploaded_at desc`,
-      [id]
-    ),
-    query(
-      `select a.id, a.action, a.created_at, u.name as user_name
-       from activity_log a
-       left join users u on u.id = a.performed_by
-       where a.customer_id = $1
-       order by a.created_at desc`,
       [id]
     ),
   ])
@@ -190,6 +177,7 @@ export async function getCustomerById(id) {
       customName: d.custom_name || null,
       fileName: d.file_name,
       fileUrl: d.file_url,
+      storagePath: d.storage_path,
       uploadedAt: d.uploaded_at,
     })),
     payments: payments.rows.map((p) => ({
@@ -198,18 +186,6 @@ export async function getCustomerById(id) {
       mode: toFePaymentMode(p.mode),
       date: p.paid_on,
       createdAt: p.created_at,
-    })),
-    photos: photos.rows.map((p) => ({
-      id: p.id,
-      fileUrl: p.file_url,
-      caption: p.caption || '',
-      uploadedAt: p.uploaded_at,
-    })),
-    history: history.rows.map((h) => ({
-      id: h.id,
-      action: h.action,
-      user: h.user_name || 'System',
-      at: h.created_at,
     })),
   }
 }
@@ -265,12 +241,17 @@ export async function quickLookup(q) {
   return getCustomerById(rows[0].id)
 }
 
-async function ensureDefaultCategories(client, customerId, enableNameChange, userId) {
+async function ensureDefaultCategories(
+  client,
+  customerId,
+  { enableNameChange = false, enableFinance = false },
+  userId
+) {
   const defs = await loadCategoryDefs()
   for (const def of defs) {
     if (def.key === 'nameChange' && !enableNameChange) continue
-    if (def.key === 'finance') continue
-    if (def.optional && def.key !== 'nameChange') continue
+    if (def.key === 'finance' && !enableFinance) continue
+    if (def.optional && !['nameChange', 'finance'].includes(def.key)) continue
 
     await client.query(
       `insert into customer_categories (customer_id, category, updated_by)
@@ -294,6 +275,7 @@ async function ensureDefaultCategories(client, customerId, enableNameChange, use
 export async function createCustomer(payload, user) {
   const capacity = parseCapacityKW(payload.solarCapacity || payload.solarCapacityKw)
   const enableNameChange = Boolean(payload.enableNameChange)
+  const enableFinance = Boolean(payload.enableFinance)
   const firstName = payload.firstName.trim()
   const middleName = (payload.middleName || '').trim()
   const lastName = payload.lastName.trim()
@@ -331,14 +313,50 @@ export async function createCustomer(payload, user) {
       ]
     )
     const id = rows[0].id
-    await ensureDefaultCategories(client, id, enableNameChange, user.id)
-    await client.query(
-      `insert into activity_log (customer_id, action, performed_by) values ($1, $2, $3)`,
-      [id, 'Customer created', user.id]
-    )
+    await ensureDefaultCategories(client, id, { enableNameChange, enableFinance }, user.id)
     return id
   })
 
+  return getCustomerById(customerId)
+}
+
+export async function updateCustomer(customerId, payload, user) {
+  const firstName = payload.firstName.trim()
+  const middleName = (payload.middleName || '').trim()
+  const lastName = payload.lastName.trim()
+  const fullName = [firstName, middleName, lastName].filter(Boolean).join(' ')
+  const capacity = parseCapacityKW(payload.solarCapacity || payload.solarCapacityKw)
+  const { rows } = await query(
+    `update customers
+     set first_name = $2, middle_name = $3, last_name = $4, name = $5,
+         consumer_number = $6, mobile = $7, email = $8, address = $9,
+         village = $10, taluka = $11, district = $12, pin = $13,
+         electricity_connection_no = $14, solar_capacity_kw = $15,
+         solar_module = $16, inverter = $17, total_due = $18, updated_at = now()
+     where id = $1
+     returning id`,
+    [
+      customerId,
+      firstName,
+      middleName || null,
+      lastName,
+      fullName,
+      payload.consumerNumber.trim(),
+      payload.mobile.trim(),
+      payload.email || null,
+      payload.address,
+      payload.village,
+      payload.taluka,
+      payload.district,
+      payload.pin,
+      payload.electricityConnectionNo,
+      capacity,
+      payload.solarModule,
+      payload.inverter,
+      Number(payload.totalDue),
+    ]
+  )
+  if (!rows[0]) throw new HttpError(404, 'Customer not found')
   return getCustomerById(customerId)
 }
 
@@ -347,10 +365,6 @@ export async function updateOverallStatus(customerId, overallStatus, user) {
   await query(
     `update customers set overall_status = $1 where id = $2`,
     [dbStatus, customerId]
-  )
-  await query(
-    `insert into activity_log (customer_id, action, performed_by) values ($1, $2, $3)`,
-    [customerId, `Overall status → ${toFeStatus(dbStatus)}`, user.id]
   )
   return getCustomerById(customerId)
 }
@@ -396,7 +410,6 @@ export async function saveCategory(customerId, categoryKey, payload, user) {
   )
 
   const before = await buildCategoriesPayload(customerId, defs)
-  const beforeStatus = before.categoryStatuses[def.key]
   const closesProject =
     def.key === 'closure' &&
     subStages.some(
@@ -508,10 +521,6 @@ export async function saveCategory(customerId, categoryKey, payload, user) {
       ]
     )
 
-    await client.query(
-      `insert into activity_log (customer_id, action, performed_by) values ($1, $2, $3)`,
-      [customerId, `${def.label} saved`, user.id]
-    )
   })
 
   if (def.key === 'pmSuryaghar' && (payload.subsidyAmount !== undefined || payload.subsidyReceivedDate !== undefined)) {
@@ -547,25 +556,10 @@ export async function saveCategory(customerId, categoryKey, payload, user) {
   }
 
   const after = await buildCategoriesPayload(customerId, defs)
-  const afterStatus = after.categoryStatuses[def.key]
-  let notificationCreated = false
-  if (beforeStatus !== afterStatus) {
-    await query(
-      `insert into notifications (customer_id, category, message)
-       values ($1, $2, $3)`,
-      [
-        customerId,
-        def.dbKey,
-        `${customerState.rows[0].name || 'Customer'}: ${def.label} → ${afterStatus}`,
-      ]
-    )
-    notificationCreated = true
-  }
-
   const updatedCustomer = await query(`select * from customers where id = $1`, [customerId])
   return {
     customer: buildWorkflowCustomer(updatedCustomer.rows[0], after, defs),
-    notificationCreated,
+    notificationCreated: false,
   }
 }
 
@@ -581,16 +575,10 @@ export async function setCustomerActive(customerId, isActive, user) {
   }
   if (customer.is_active === isActive) return getCustomerById(customerId)
 
-  await withTransaction(async (client) => {
-    await client.query(
-      `update customers set is_active = $1, updated_at = now() where id = $2`,
-      [isActive, customerId]
-    )
-    await client.query(
-      `insert into activity_log (customer_id, action, performed_by) values ($1, $2, $3)`,
-      [customerId, isActive ? 'Customer reactivated' : 'Customer marked inactive', user.id]
-    )
-  })
+  await query(
+    `update customers set is_active = $1, updated_at = now() where id = $2`,
+    [isActive, customerId]
+  )
   return getCustomerById(customerId)
 }
 
@@ -622,9 +610,6 @@ export async function updateSubStage(customerId, categoryKey, subStageKey, value
     [customerId, def.dbKey, user.id]
   )
 
-  const before = await buildCategoriesPayload(customerId, defs)
-  const beforeStatus = before.categoryStatuses[def.key]
-
   await withTransaction(async (client) => {
     await client.query(
       `insert into customer_sub_stages (customer_id, category, sub_stage_key, value, updated_by)
@@ -649,27 +634,7 @@ export async function updateSubStage(customerId, categoryKey, subStageKey, value
       [user.id, customerId, def.dbKey]
     )
 
-    await client.query(
-      `insert into activity_log (customer_id, action, performed_by)
-       values ($1, $2, $3)`,
-      [customerId, `${def.label}: ${sub.label} → ${feValue}`, user.id]
-    )
   })
-
-  const after = await buildCategoriesPayload(customerId, defs)
-  const afterStatus = after.categoryStatuses[def.key]
-  if (beforeStatus !== afterStatus) {
-    const { rows: cust } = await query(`select name from customers where id = $1`, [customerId])
-    await query(
-      `insert into notifications (customer_id, category, message)
-       values ($1, $2, $3)`,
-      [
-        customerId,
-        def.dbKey,
-        `${cust[0]?.name || 'Customer'}: ${def.label} → ${afterStatus}`,
-      ]
-    )
-  }
 
   return getCustomerById(customerId)
 }
@@ -734,10 +699,6 @@ export async function enableOptionalCategory(customerId, categoryKey, user) {
         [customerId, def.dbKey, sub.dbKey, toDbStatus(sub.options[0]), user.id]
       )
     }
-    await client.query(
-      `insert into activity_log (customer_id, action, performed_by) values ($1, $2, $3)`,
-      [customerId, `${def.label} enabled`, user.id]
-    )
   })
   return getCustomerById(customerId)
 }
@@ -756,10 +717,6 @@ export async function disableOptionalCategory(customerId, categoryKey, user) {
       `delete from customer_categories where customer_id = $1 and category = $2`,
       [customerId, def.dbKey]
     )
-    await client.query(
-      `insert into activity_log (customer_id, action, performed_by) values ($1, $2, $3)`,
-      [customerId, `${def.label} marked not applicable`, user.id]
-    )
   })
   return getCustomerById(customerId)
 }
@@ -774,14 +731,6 @@ export async function addPayment(customerId, payment, user) {
       Number(payment.amount),
       toDbPaymentMode(payment.mode),
       payment.date,
-      user.id,
-    ]
-  )
-  await query(
-    `insert into activity_log (customer_id, action, performed_by) values ($1, $2, $3)`,
-    [
-      customerId,
-      `Payment recorded: ₹${Number(payment.amount).toLocaleString('en-IN')} (${toFePaymentMode(payment.mode)})`,
       user.id,
     ]
   )
@@ -806,16 +755,17 @@ export async function listPayments(customerId) {
   }))
 }
 
-export async function addDocument(customerId, { type, customName, fileName, fileUrl }, user) {
+export async function addDocument(
+  customerId,
+  { type, customName, fileName, fileUrl, storagePath },
+  user
+) {
   const resolved = resolveDocumentType(type, customName)
   const { rows } = await query(
-    `insert into documents (customer_id, doc_type, custom_name, file_name, file_url, uploaded_by)
-     values ($1, $2, $3, $4, $5, $6) returning *`,
-    [customerId, resolved.docType, resolved.customName, fileName, fileUrl, user.id]
-  )
-  await query(
-    `insert into activity_log (customer_id, action, performed_by) values ($1, $2, $3)`,
-    [customerId, `Document uploaded: ${resolved.customName || toFeDocumentType(resolved.docType)}`, user.id]
+    `insert into documents (
+       customer_id, doc_type, custom_name, file_name, file_url, storage_path, uploaded_by
+     ) values ($1, $2, $3, $4, $5, $6, $7) returning *`,
+    [customerId, resolved.docType, resolved.customName, fileName, fileUrl, storagePath, user.id]
   )
   return {
     id: rows[0].id,
@@ -823,26 +773,27 @@ export async function addDocument(customerId, { type, customName, fileName, file
     customName: rows[0].custom_name || null,
     fileName: rows[0].file_name,
     fileUrl: rows[0].file_url,
+    storagePath: rows[0].storage_path,
     uploadedAt: rows[0].uploaded_at,
   }
 }
 
-export async function addPhoto(customerId, { caption, fileUrl }, user) {
+export async function getDocument(customerId, documentId) {
   const { rows } = await query(
-    `insert into photos (customer_id, file_url, caption, uploaded_by)
-     values ($1, $2, $3, $4) returning *`,
-    [customerId, fileUrl, caption || null, user.id]
+    `select * from documents where id = $1 and customer_id = $2`,
+    [documentId, customerId]
   )
-  await query(
-    `insert into activity_log (customer_id, action, performed_by) values ($1, $2, $3)`,
-    [customerId, 'Installation photo uploaded', user.id]
+  if (!rows[0]) throw new HttpError(404, 'Document not found')
+  return rows[0]
+}
+
+export async function deleteDocumentRecord(customerId, documentId, user) {
+  const { rows } = await query(
+    `delete from documents where id = $1 and customer_id = $2 returning *`,
+    [documentId, customerId]
   )
-  return {
-    id: rows[0].id,
-    fileUrl: rows[0].file_url,
-    caption: rows[0].caption || '',
-    uploadedAt: rows[0].uploaded_at,
-  }
+  if (!rows[0]) throw new HttpError(404, 'Document not found')
+  return rows[0]
 }
 
 export async function updateSubsidyMeta(customerId, { subsidyAmount, subsidyReceivedDate }, user) {
@@ -856,10 +807,6 @@ export async function updateSubsidyMeta(customerId, { subsidyAmount, subsidyRece
       subsidyReceivedDate || null,
       customerId,
     ]
-  )
-  await query(
-    `insert into activity_log (customer_id, action, performed_by) values ($1, $2, $3)`,
-    [customerId, 'Subsidy details updated', user.id]
   )
   return getCustomerById(customerId)
 }
@@ -887,25 +834,5 @@ export async function getDashboardSummary() {
 }
 
 export async function getRecentActivity(limit = 10) {
-  const { rows } = await query(
-    `select a.id, a.action, a.created_at, c.id as customer_id, c.name as customer_name,
-            c.overall_status, u.name as user_name
-     from activity_log a
-     join customers c on c.id = a.customer_id
-     left join users u on u.id = a.performed_by
-     order by a.created_at desc
-     limit $1`,
-    [limit]
-  )
-  return rows.map((r) => ({
-    id: r.id,
-    action: r.action,
-    at: r.created_at,
-    user: r.user_name || 'System',
-    customer: {
-      id: r.customer_id,
-      name: r.customer_name,
-      overallStatus: toFeStatus(r.overall_status),
-    },
-  }))
+  return []
 }

@@ -12,9 +12,7 @@ import { errorHandler, notFound, HttpError } from './middleware/error.js'
 import authRoutes from './routes/auth.js'
 import usersRoutes from './routes/users.js'
 import dashboardRoutes from './routes/dashboard.js'
-import activityRoutes from './routes/activity.js'
 import customersRoutes from './routes/customers.js'
-import notificationsRoutes from './routes/notifications.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -50,9 +48,7 @@ export function createApp() {
 
   app.use('/api', requireAuth)
   app.use('/api/dashboard', dashboardRoutes)
-  app.use('/api/activity', activityRoutes)
   app.use('/api/customers', customersRoutes)
-  app.use('/api/notifications', notificationsRoutes)
   app.use('/api/users', usersRoutes)
 
   app.use(notFound)

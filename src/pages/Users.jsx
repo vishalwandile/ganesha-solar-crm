@@ -18,6 +18,7 @@ function emptyForm() {
   return {
     name: '',
     username: '',
+    mobile: '',
     password: '',
     team: TEAMS[0],
     permissionCategories: [],
@@ -98,6 +99,7 @@ export default function Users() {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [editingId, setEditingId] = useState(null)
+  const [editMobile, setEditMobile] = useState('')
   const [editFeatures, setEditFeatures] = useState([])
   const [editPerms, setEditPerms] = useState([])
 
@@ -108,8 +110,20 @@ export default function Users() {
   async function handleSubmit(e) {
     e.preventDefault()
     setError('')
-    if (!form.name.trim() || !form.username.trim() || !form.password.trim()) {
-      setError('Name, username, and password are required.')
+    if (form.name.trim().length < 2) {
+      setError('Name must contain at least 2 characters.')
+      return
+    }
+    if (!/^[A-Za-z0-9._-]{3,40}$/.test(form.username.trim())) {
+      setError('Username must contain 3–40 letters, numbers, dots, underscores, or hyphens.')
+      return
+    }
+    if (!/^[6-9]\d{9}$/.test(form.mobile.trim())) {
+      setError('Enter a valid 10-digit Indian mobile number.')
+      return
+    }
+    if (form.password.length < 6) {
+      setError('Password must contain at least 6 characters.')
       return
     }
     setBusy(true)
@@ -126,17 +140,23 @@ export default function Users() {
 
   function startEdit(user) {
     setEditingId(user.id)
+    setEditMobile(user.mobile || '')
     setEditFeatures(user.isAdmin ? FEATURES.map((f) => f.key) : user.features || [])
     setEditPerms(user.permissions || [])
   }
 
   async function saveAccess(user) {
     setError('')
+    if (editMobile && !/^[6-9]\d{9}$/.test(editMobile)) {
+      setError('Enter a valid 10-digit Indian mobile number.')
+      return
+    }
     setBusy(true)
     try {
       await updateUserAccess(user.id, {
         features: user.isAdmin ? FEATURES.map((f) => f.key) : editFeatures,
         permissions: editPerms,
+        mobile: editMobile,
       })
       setEditingId(null)
     } catch (err) {
@@ -191,6 +211,19 @@ export default function Users() {
               />
             </div>
             <div>
+              <label className="ui-label">Mobile number *</label>
+              <input
+                inputMode="numeric"
+                maxLength={10}
+                value={form.mobile}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, mobile: e.target.value.replace(/\D/g, '') }))
+                }
+                placeholder="10-digit mobile number"
+                required
+              />
+            </div>
+            <div>
               <label className="ui-label">Team</label>
               <select
                 value={form.team}
@@ -232,7 +265,7 @@ export default function Users() {
           </div>
           {error && <p className="text-xs font-medium text-red-600">{error}</p>}
           <button type="submit" className="ui-btn-primary" disabled={busy}>
-            {busy ? 'Saving…' : 'Save'}
+            Save
           </button>
         </form>
       )}
@@ -254,6 +287,7 @@ export default function Users() {
                 <div>
                   <div className="text-sm font-bold text-ink">{u.name}</div>
                   <div className="text-xs text-ink-muted">@{u.username}</div>
+                  {u.mobile && <div className="mt-0.5 text-xs text-ink-muted">{u.mobile}</div>}
                 </div>
               </div>
               <span
@@ -278,6 +312,16 @@ export default function Users() {
             {sessionUser?.isAdmin && editingId === u.id && (
               <div className="mt-3 space-y-3">
                 <div>
+                  <label className="ui-label">Mobile number</label>
+                  <input
+                    inputMode="numeric"
+                    maxLength={10}
+                    value={editMobile}
+                    onChange={(e) => setEditMobile(e.target.value.replace(/\D/g, ''))}
+                    placeholder="10-digit mobile number"
+                  />
+                </div>
+                <div>
                   <div className="ui-label">Screens & features</div>
                   {u.isAdmin ? (
                     <p className="text-xs text-ink-muted">Admin always has every feature.</p>
@@ -291,7 +335,7 @@ export default function Users() {
                 </div>
                 <div className="flex gap-2">
                   <button type="button" className="ui-btn-primary" disabled={busy} onClick={() => saveAccess(u)}>
-                    {busy ? 'Saving…' : 'Save access'}
+                    Save access
                   </button>
                   <button type="button" className="ui-btn-secondary" onClick={() => setEditingId(null)}>
                     Cancel

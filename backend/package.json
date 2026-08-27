@@ -6,16 +6,22 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "nodemon src/index.js",
+    "dev:uat": "APP_ENV=uat nodemon src/index.js",
     "start": "node src/index.js",
+    "start:uat": "APP_ENV=uat node src/index.js",
     "seed": "node src/scripts/seedAdmin.js",
+    "seed:uat": "APP_ENV=uat node src/scripts/seedAdmin.js",
     "db:push": "node src/scripts/applySchema.js",
-    "db:migrate": "node src/scripts/migrate.js"
+    "db:push:uat": "APP_ENV=uat node src/scripts/applySchema.js",
+    "db:migrate": "node src/scripts/migrate.js",
+    "db:migrate:uat": "APP_ENV=uat node src/scripts/migrate.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "module",
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1118.0",
     "@supabase/ssr": "^0.12.4",
     "@supabase/supabase-js": "^2.112.3",
     "bcryptjs": "^3.0.3",
@@ -29,6 +35,7 @@
     "morgan": "^1.11.0",
     "multer": "^2.2.0",
     "pg": "^8.23.0",
+    "sharp": "^0.35.3",
     "zod": "^4.4.3"
   },
   "devDependencies": {

@@ -17,6 +17,12 @@ function dateKey(subKey) {
   return `${subKey}Date`
 }
 
+function todayForInput() {
+  const now = new Date()
+  const offset = now.getTimezoneOffset()
+  return new Date(now.getTime() - offset * 60_000).toISOString().slice(0, 10)
+}
+
 export default function PmSuryagharPortal({
   customer,
   data,
@@ -48,6 +54,7 @@ export default function PmSuryagharPortal({
   const [savedMsg, setSavedMsg] = useState('')
   const progress = getPmSuryagharProgress(draft.values)
   const estimate = calculateExpectedSubsidy(parseCapacityKW(customer.solarCapacity))
+  const today = todayForInput()
 
   useEffect(() => {
     setDraft(initialDraft)
@@ -195,6 +202,7 @@ export default function PmSuryagharPortal({
                       <label className="ui-label">Date</label>
                       <input
                         type="date"
+                        max={today}
                         value={draft.dates[sub.key] || ''}
                         onChange={(e) =>
                           setDraft((d) => ({
@@ -223,6 +231,7 @@ export default function PmSuryagharPortal({
                     <label className="ui-label">Subsidy received date</label>
                     <input
                       type="date"
+                      max={today}
                       value={draft.subsidyReceivedDate}
                       onChange={(e) =>
                         setDraft((d) => ({ ...d, subsidyReceivedDate: e.target.value }))
@@ -238,7 +247,7 @@ export default function PmSuryagharPortal({
                   disabled={saving}
                   onClick={() => handleStageSave(sub)}
                 >
-                  {saving ? 'Saving…' : 'Save'}
+                  Save
                 </button>
                 {savedMsg === sub.key && (
                   <span className="text-sm font-semibold text-green-600">Saved</span>

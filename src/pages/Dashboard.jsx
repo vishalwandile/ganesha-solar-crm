@@ -30,20 +30,9 @@ export default function Dashboard() {
   const [query, setQuery] = useState('')
   const [quickMatch, setQuickMatch] = useState(null)
   const [lookupMsg, setLookupMsg] = useState('')
-  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    let alive = true
-    ;(async () => {
-      try {
-        await loadDashboard()
-      } finally {
-        if (alive) setLoading(false)
-      }
-    })()
-    return () => {
-      alive = false
-    }
+    loadDashboard().catch(() => {})
   }, [loadDashboard])
 
   useEffect(() => {
@@ -66,15 +55,12 @@ export default function Dashboard() {
   }, [query, quickLookup])
 
   const counts = dashboard.counts || {}
-  const recent = dashboard.recent || []
 
   return (
     <Layout title="Dashboard" subtitle="Overview of solar applications and customer status">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-sm text-ink-muted">
-          {loading
-            ? 'Loading…'
-            : `Welcome back — ${dashboard.total} active customers in the pipeline.`}
+          {`Welcome back — ${dashboard.total} active customers in the pipeline.`}
         </p>
         {hasFeature(sessionUser, 'createCustomer') && (
           <Link to="/customers/new" className="ui-btn-primary">
@@ -145,35 +131,6 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div className="ui-surface overflow-hidden">
-        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
-          <div>
-            <div className="text-sm font-bold text-ink">Recently updated</div>
-            <div className="text-xs text-ink-muted">Latest activity across customers</div>
-          </div>
-          <Link to="/customers" className="text-xs font-bold text-blue-600 hover:text-blue-700">
-            View all
-          </Link>
-        </div>
-        <div className="divide-y divide-slate-100">
-          {recent.map((item) => (
-            <Link
-              key={item.id}
-              to={`/customers/${item.customer.id}`}
-              className="flex items-center justify-between gap-3 px-5 py-3.5 transition hover:bg-slate-50"
-            >
-              <div className="min-w-0">
-                <div className="truncate text-sm font-semibold text-ink">{item.customer.name}</div>
-                <div className="truncate text-xs text-ink-muted">{item.action}</div>
-              </div>
-              <StatusBadge status={item.customer.overallStatus} />
-            </Link>
-          ))}
-          {!loading && recent.length === 0 && (
-            <div className="px-5 py-8 text-center text-sm text-ink-soft">No activity yet.</div>
-          )}
-        </div>
-      </div>
     </Layout>
   )
 }

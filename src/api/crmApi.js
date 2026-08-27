@@ -1,4 +1,4 @@
-import { apiRequest, setToken } from './client.js'
+import { apiRequest, getApiUrl, setToken } from './client.js'
 
 export const crmApi = {
   login(username, password) {
@@ -23,10 +23,6 @@ export const crmApi = {
     return apiRequest('/api/dashboard/summary')
   },
 
-  recentActivity(limit = 10) {
-    return apiRequest(`/api/activity/recent?limit=${limit}`)
-  },
-
   listCustomers(search = '', page = 1, pageSize = 20) {
     const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) })
     if (search) params.set('search', search)
@@ -43,6 +39,10 @@ export const crmApi = {
 
   createCustomer(payload) {
     return apiRequest('/api/customers', { method: 'POST', body: payload })
+  },
+
+  updateCustomer(id, payload) {
+    return apiRequest(`/api/customers/${id}`, { method: 'PATCH', body: payload })
   },
 
   setCustomerActive(id, isActive) {
@@ -107,27 +107,18 @@ export const crmApi = {
     return apiRequest(`/api/customers/${id}/documents`, { method: 'POST', body: form })
   },
 
-  uploadPhoto(id, file, caption = '') {
-    const form = new FormData()
-    form.append('file', file)
-    if (caption) form.append('caption', caption)
-    return apiRequest(`/api/customers/${id}/photos`, { method: 'POST', body: form })
+  deleteDocument(customerId, documentId) {
+    return apiRequest(`/api/customers/${customerId}/documents/${documentId}`, {
+      method: 'DELETE',
+    })
   },
 
-  listNotifications() {
-    return apiRequest('/api/notifications')
+  documentDownloadUrl(customerId, documentId) {
+    return getApiUrl(`/api/customers/${customerId}/documents/${documentId}/download`)
   },
 
-  unreadNotificationCount() {
-    return apiRequest('/api/notifications/unread-count')
-  },
-
-  markNotificationRead(id) {
-    return apiRequest(`/api/notifications/${id}/read`, { method: 'PATCH' })
-  },
-
-  markAllNotificationsRead() {
-    return apiRequest('/api/notifications/read-all', { method: 'PATCH' })
+  documentViewUrl(customerId, documentId) {
+    return getApiUrl(`/api/customers/${customerId}/documents/${documentId}/view`)
   },
 
   listUsers() {

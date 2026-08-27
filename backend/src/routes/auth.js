@@ -37,16 +37,14 @@ router.post(
     const token = signToken(user)
     setAuthCookie(res, token)
 
-    const [perms, unread] = await Promise.all([
-      query(`select category, can_edit from user_category_permissions where user_id = $1`, [
-        user.id,
-      ]),
-      query(`select count(*)::int as count from notifications where is_read = false`),
-    ])
+    const perms = await query(
+      `select category, can_edit from user_category_permissions where user_id = $1`,
+      [user.id]
+    )
 
     res.json({
       token,
-      unreadNotificationCount: unread.rows[0].count,
+      unreadNotificationCount: 0,
       user: {
         id: user.id,
         name: user.name,
@@ -72,14 +70,12 @@ router.get(
   '/me',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const [perms, unread] = await Promise.all([
-      query(`select category, can_edit from user_category_permissions where user_id = $1`, [
-        req.user.id,
-      ]),
-      query(`select count(*)::int as count from notifications where is_read = false`),
-    ])
+    const perms = await query(
+      `select category, can_edit from user_category_permissions where user_id = $1`,
+      [req.user.id]
+    )
     res.json({
-      unreadNotificationCount: unread.rows[0].count,
+      unreadNotificationCount: 0,
       user: {
         id: req.user.id,
         name: req.user.name,

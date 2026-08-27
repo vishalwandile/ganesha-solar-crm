@@ -39,9 +39,7 @@ export function CrmProvider({ children }) {
   })
   const [customerCache, setCustomerCache] = useState({})
   const [users, setUsers] = useState([])
-  const [notifications, setNotifications] = useState([])
-  const [unreadNotificationCount, setUnreadNotificationCount] = useState(0)
-  const [dashboard, setDashboard] = useState({ total: 0, inactive: 0, counts: {}, recent: [] })
+  const [dashboard, setDashboard] = useState({ total: 0, inactive: 0, counts: {} })
   const [hydrated, setHydrated] = useState(false)
   const [error, setError] = useState('')
 
@@ -83,19 +81,6 @@ export function CrmProvider({ children }) {
     return data.customers || []
   }, [])
 
-  const refreshNotifications = useCallback(async () => {
-    const data = await crmApi.listNotifications()
-    setNotifications(data.notifications || [])
-    setUnreadNotificationCount((data.notifications || []).filter((item) => !item.read).length)
-    return data.notifications || []
-  }, [])
-
-  const refreshUnreadNotificationCount = useCallback(async () => {
-    const data = await crmApi.unreadNotificationCount()
-    setUnreadNotificationCount(data.count || 0)
-    return data.count || 0
-  }, [])
-
   const refreshUsers = useCallback(async () => {
     const data = await crmApi.listUsers()
     const list = (data.users || []).map(normalizeUser)
@@ -109,7 +94,6 @@ export function CrmProvider({ children }) {
       total: summary.total || 0,
       inactive: summary.inactive || 0,
       counts: summary.counts || {},
-      recent: summary.recent || [],
     }
     setDashboard(next)
     return next
@@ -131,10 +115,9 @@ export function CrmProvider({ children }) {
         return
       }
       try {
-        const { user, unreadNotificationCount: unreadCount } = await crmApi.me()
+        const { user } = await crmApi.me()
         if (!alive) return
         setSessionUser(normalizeUser(user))
-        setUnreadNotificationCount(unreadCount || 0)
       } catch {
         setToken(null)
         if (alive) setSessionUser(null)
@@ -152,7 +135,6 @@ export function CrmProvider({ children }) {
       setError('')
       const data = await crmApi.login(username, password)
       setSessionUser(normalizeUser(data.user))
-      setUnreadNotificationCount(data.unreadNotificationCount || 0)
       return data.user
     },
     []
@@ -167,9 +149,7 @@ export function CrmProvider({ children }) {
       setCustomerPagination({ page: 1, pageSize: 20, total: 0, totalPages: 1 })
       setCustomerCache({})
       setUsers([])
-      setNotifications([])
-      setUnreadNotificationCount(0)
-      setDashboard({ total: 0, inactive: 0, counts: {}, recent: [] })
+      setDashboard({ total: 0, inactive: 0, counts: {} })
     }
   }, [])
 
@@ -202,6 +182,7 @@ export function CrmProvider({ children }) {
         inverter: form.inverter,
         totalDue: form.totalDue ? Number(form.totalDue) : undefined,
         enableNameChange: Boolean(form.enableNameChange),
+        enableFinance: Boolean(form.enableFinance),
       }
       const { customer } = await crmApi.createCustomer(payload)
       for (const [type, file] of Object.entries(files)) {
@@ -225,14 +206,21 @@ export function CrmProvider({ children }) {
     [upsertCustomerCache]
   )
 
+  const updateCustomer = useCallback(
+    async (id, payload) => {
+      const { customer } = await crmApi.updateCustomer(id, payload)
+      return upsertCustomerCache(customer)
+    },
+    [upsertCustomerCache]
+  )
+
   const saveCategory = useCallback(
     async (customerId, categoryKey, payload) => {
-      const { customer, notificationCreated } = await crmApi.saveCategory(
+      const { customer } = await crmApi.saveCategory(
         customerId,
         categoryKey,
         payload
       )
-      if (notificationCreated) setUnreadNotificationCount((count) => count + 1)
       return upsertCustomerCache(customer)
     },
     [upsertCustomerCache]
@@ -247,10 +235,9 @@ export function CrmProvider({ children }) {
         value,
         rejectionReason
       )
-      await refreshNotifications()
       return upsertCustomerCache(customer)
     },
-    [upsertCustomerCache, refreshNotifications]
+    [upsertCustomerCache]
   )
 
   const updateCategoryNotes = useCallback(
@@ -309,28 +296,13 @@ export function CrmProvider({ children }) {
     [loadCustomer]
   )
 
-  const addPhoto = useCallback(
-    async (customerId, file, caption) => {
-      await crmApi.uploadPhoto(customerId, file, caption)
+  const deleteDocument = useCallback(
+    async (customerId, documentId) => {
+      await crmApi.deleteDocument(customerId, documentId)
       return loadCustomer(customerId)
     },
     [loadCustomer]
   )
-
-  const markNotificationRead = useCallback(async (id) => {
-    await crmApi.markNotificationRead(id)
-    setNotifications((prev) => {
-      const wasUnread = prev.some((n) => n.id === id && !n.read)
-      if (wasUnread) setUnreadNotificationCount((count) => Math.max(0, count - 1))
-      return prev.map((n) => (n.id === id ? { ...n, read: true } : n))
-    })
-  }, [])
-
-  const markAllNotificationsRead = useCallback(async () => {
-    await crmApi.markAllNotificationsRead()
-    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })))
-    setUnreadNotificationCount(0)
-  }, [])
 
   const addUser = useCallback(
     async (user) => {
@@ -338,6 +310,7 @@ export function CrmProvider({ children }) {
         name: user.name,
         username: user.username,
         password: user.password,
+        mobile: user.mobile,
         team: user.team,
         isAdmin: user.team === 'Admin',
         permissions: user.permissionCategories || [],
@@ -374,8 +347,6 @@ export function CrmProvider({ children }) {
       customerPagination,
       customerCache,
       users,
-      notifications,
-      unreadNotificationCount,
       dashboard,
       login,
       logout,
@@ -384,6 +355,7 @@ export function CrmProvider({ children }) {
       loadDashboard,
       quickLookup,
       createCustomer,
+      updateCustomer,
       setCustomerActive,
       saveCategory,
       updateSubStage,
@@ -394,11 +366,7 @@ export function CrmProvider({ children }) {
       updateSubsidyMeta,
       addPayment,
       addDocument,
-      addPhoto,
-      refreshNotifications,
-      refreshUnreadNotificationCount,
-      markNotificationRead,
-      markAllNotificationsRead,
+      deleteDocument,
       refreshUsers,
       addUser,
       updateUserAccess,
@@ -413,8 +381,6 @@ export function CrmProvider({ children }) {
       customerPagination,
       customerCache,
       users,
-      notifications,
-      unreadNotificationCount,
       dashboard,
       login,
       logout,
@@ -423,6 +389,7 @@ export function CrmProvider({ children }) {
       loadDashboard,
       quickLookup,
       createCustomer,
+      updateCustomer,
       setCustomerActive,
       saveCategory,
       updateSubStage,
@@ -433,11 +400,7 @@ export function CrmProvider({ children }) {
       updateSubsidyMeta,
       addPayment,
       addDocument,
-      addPhoto,
-      refreshNotifications,
-      refreshUnreadNotificationCount,
-      markNotificationRead,
-      markAllNotificationsRead,
+      deleteDocument,
       refreshUsers,
       addUser,
       updateUserAccess,

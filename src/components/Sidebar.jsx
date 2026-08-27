@@ -1,12 +1,11 @@
 import { NavLink } from 'react-router-dom'
-import { IconBell, IconClose, IconDashboard, IconTeam, IconUsers } from './Icons'
+import { IconClose, IconDashboard, IconTeam, IconUsers } from './Icons'
 import { useCrm } from '../context/CrmContext'
 import { hasFeature } from '../data/features'
 
 const NAV_ITEMS = [
   { to: '/', label: 'Dashboard', icon: IconDashboard, end: true, feature: 'dashboard' },
   { to: '/customers', label: 'Customers', icon: IconUsers, feature: 'customers' },
-  { to: '/notifications', label: 'Notifications', icon: IconBell, feature: 'notifications' },
   { to: '/users', label: 'Users & teams', icon: IconTeam, feature: 'users' },
 ]
 
@@ -24,7 +23,7 @@ export default function Sidebar({ open, onClose }) {
       />
 
       <aside
-        className={`fixed inset-y-0 left-0 z-50 flex w-72 flex-col border-r border-slate-200/80 bg-white transition-transform duration-300 lg:static lg:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-50 flex w-72 flex-col border-r border-slate-200/80 bg-white transition-transform duration-300 lg:sticky lg:top-0 lg:h-screen lg:shrink-0 lg:self-start lg:translate-x-0 ${
           open ? 'translate-x-0' : '-translate-x-full'
         }`}
       >

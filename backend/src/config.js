@@ -1,4 +1,4 @@
-import 'dotenv/config'
+import './loadEnv.js'
 
 function required(name, fallback) {
   const value = process.env[name] ?? fallback
@@ -37,10 +37,13 @@ export const config = {
         .filter(Boolean)
     )
   ),
-  supabaseUrl: process.env.SUPABASE_URL || '',
-  supabaseServiceKey: process.env.SUPABASE_SERVICE_ROLE_KEY || '',
-  documentsBucket: process.env.SUPABASE_DOCUMENTS_BUCKET || 'documents',
-  photosBucket: process.env.SUPABASE_PHOTOS_BUCKET || 'photos',
+  supabaseUrl: (process.env.SUPABASE_URL || '').trim(),
+  supabaseServiceKey: (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim(),
+  storageEndpoint: (process.env.STORAGE_S3_ENDPOINT || '').trim(),
+  storageRegion: (process.env.STORAGE_S3_REGION || 'ap-northeast-1').trim(),
+  storageAccessKeyId: (process.env.STORAGE_S3_ACCESS_KEY_ID || '').trim(),
+  storageSecretAccessKey: (process.env.STORAGE_S3_SECRET_ACCESS_KEY || '').trim(),
+  documentsBucket: process.env.SUPABASE_DOCUMENTS_BUCKET || 'ganesha_solar',
   seedAdmin: {
     name: process.env.SEED_ADMIN_NAME || 'Vishal Wandile',
     username: process.env.SEED_ADMIN_USERNAME || 'vishal.wandile',

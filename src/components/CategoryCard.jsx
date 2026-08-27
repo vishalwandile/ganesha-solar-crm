@@ -3,8 +3,16 @@ import StatusBadge from './StatusBadge'
 import { IconChevron } from './Icons'
 import { getCategoryStatus, daysBetween } from '../data/mockData'
 
+const DONE = ['Completed', 'Claimed', 'Disbursed', 'Approved', 'Yes']
+
 function dateKey(subKey) {
   return `${subKey}Date`
+}
+
+function todayForInput() {
+  const now = new Date()
+  const offset = now.getTimezoneOffset()
+  return new Date(now.getTime() - offset * 60_000).toISOString().slice(0, 10)
 }
 
 export default function CategoryCard({
@@ -51,6 +59,7 @@ export default function CategoryCard({
 
   const [draft, setDraft] = useState(initialDraft)
   const [savedMsg, setSavedMsg] = useState('')
+  const today = todayForInput()
 
   useEffect(() => {
     setDraft(initialDraft)
@@ -166,17 +175,47 @@ export default function CategoryCard({
             />
           </div>
 
-          {categoryDef.subStages.map((sub) => (
-            <div key={sub.key} className="rounded-xl border border-slate-100 bg-white p-3">
-              <span className="mb-2 block text-sm font-medium text-ink">
-                {sub.label}
-                {sub.key === 'subsidy' && subsidyEstimate ? (
-                  <span className="ml-1.5 text-xs font-normal text-ink-muted">
-                    (est. &#8377;{subsidyEstimate.toLocaleString('en-IN')})
-                  </span>
-                ) : null}
-              </span>
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          {categoryDef.subStages.map((sub, index) => {
+            const value = draft.values[sub.key]
+            const complete = DONE.includes(value)
+            const firstIncomplete = categoryDef.subStages.findIndex(
+              (stage) => !DONE.includes(draft.values[stage.key])
+            )
+            const isCurrent = !complete && index === firstIncomplete
+
+            return (
+            <div
+              key={sub.key}
+              className={`rounded-2xl border p-4 transition ${
+                complete
+                  ? 'border-green-200 bg-green-50/40'
+                  : isCurrent
+                    ? 'border-orange-300 bg-orange-50/60 shadow-soft'
+                    : 'border-slate-200 bg-slate-50/50'
+              }`}
+            >
+              <div className="flex min-w-0 items-start gap-3">
+                <div
+                  className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-sm font-extrabold ${
+                    complete
+                      ? 'bg-green-500 text-white'
+                      : isCurrent
+                        ? 'bg-orange-500 text-white'
+                        : 'bg-white text-ink-muted ring-1 ring-slate-200'
+                  }`}
+                >
+                  {complete ? '✓' : index + 1}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-bold text-ink">
+                    {sub.label}
+                    {sub.key === 'subsidy' && subsidyEstimate ? (
+                      <span className="ml-1.5 text-xs font-normal text-ink-muted">
+                        (est. &#8377;{subsidyEstimate.toLocaleString('en-IN')})
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
                 <div>
                   <label className="ui-label">Status</label>
                   <select
@@ -208,6 +247,7 @@ export default function CategoryCard({
                   <label className="ui-label">Date</label>
                   <input
                     type="date"
+                    max={today}
                     value={draft.dates[sub.key] || ''}
                     onChange={(e) =>
                       setDraft((d) => ({
@@ -216,6 +256,8 @@ export default function CategoryCard({
                       }))
                     }
                   />
+                </div>
+              </div>
                 </div>
               </div>
               {categoryDef.key === 'closure' && !closureReady && (
@@ -277,6 +319,7 @@ export default function CategoryCard({
                     <label className="ui-label">Received date</label>
                     <input
                       type="date"
+                      max={today}
                       value={draft.extra.receivedDate || ''}
                       onChange={(e) =>
                         setDraft((d) => ({
@@ -300,14 +343,15 @@ export default function CategoryCard({
                   }
                   onClick={() => handleStageSave(sub)}
                 >
-                  {saving ? 'Saving…' : 'Save'}
+                  Save
                 </button>
                 {savedMsg === sub.key && (
                   <span className="text-sm font-semibold text-green-600">Saved</span>
                 )}
               </div>
             </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </div>

@@ -1,5 +1,5 @@
 import bcrypt from 'bcryptjs'
-import 'dotenv/config'
+import '../loadEnv.js'
 import pg from 'pg'
 import { config } from '../config.js'
 import { defaultFeaturesForTeam } from '../lib/features.js'

@@ -5,11 +5,9 @@ import { asyncHandler, HttpError } from '../middleware/error.js'
 import { requireCategoryEdit, requireCategoryFeature, requireFeature } from '../middleware/permissions.js'
 import { redactCustomer } from '../lib/features.js'
 import { config } from '../config.js'
-import { uploadFile } from '../services/storage.js'
 import {
   addDocument,
   addPayment,
-  addPhoto,
   createCustomer,
   disableOptionalCategory,
   enableOptionalCategory,
@@ -23,36 +21,97 @@ import {
   updateCategoryExtra,
   updateCategoryNotes,
   updateSubsidyMeta,
+  updateCustomer,
+  getDocument,
+  deleteDocumentRecord,
 } from '../services/customers.js'
-import { query } from '../db.js'
+import {
+  compressImage,
+  deleteFile,
+  downloadFile,
+  storageLocationFromUrl,
+  uploadFile,
+} from '../services/storage.js'
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 15 * 1024 * 1024 },
+  limits: { fileSize: 500 * 1024, files: 1 },
 })
 
 const router = Router()
 
-const createSchema = z.object({
-  firstName: z.string().min(1),
-  middleName: z.string().optional(),
-  lastName: z.string().min(1),
-  consumerNumber: z.string().min(1),
-  mobile: z.string().min(1),
-  email: z.string().optional(),
-  address: z.string().optional(),
-  village: z.string().optional(),
-  taluka: z.string().optional(),
-  district: z.string().optional(),
-  pin: z.string().optional(),
-  electricityConnectionNo: z.string().optional(),
-  solarCapacity: z.union([z.string(), z.number()]).optional(),
+function todayInIndia() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date())
+}
+
+const nonFutureDate = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Enter a valid date')
+  .refine((date) => date <= todayInIndia(), 'Future dates are not allowed')
+
+const optionalDate = z.union([nonFutureDate, z.null()]).optional()
+
+const nameField = z
+  .string()
+  .trim()
+  .min(2)
+  .max(50)
+  .regex(/^[\p{L}][\p{L}\s'-]*$/u, 'Use letters, spaces, apostrophes, or hyphens only')
+
+const customerDetailsSchema = z.object({
+  firstName: nameField,
+  middleName: z.union([nameField, z.literal('')]).optional(),
+  lastName: nameField,
+  consumerNumber: z.string().trim().regex(/^[A-Za-z0-9/-]{3,40}$/),
+  mobile: z.string().trim().regex(/^[6-9]\d{9}$/, 'Enter a valid 10-digit Indian mobile number'),
+  email: z.union([z.string().trim().email(), z.literal('')]).optional(),
+  address: z.string().trim().min(2).max(250),
+  village: z.string().trim().min(2).max(80),
+  taluka: z.string().trim().min(2).max(80),
+  district: z.string().trim().min(2).max(80),
+  pin: z.string().trim().regex(/^\d{6}$/, 'Enter a valid 6-digit PIN code'),
+  electricityConnectionNo: z.string().trim().min(3).max(50),
+  solarCapacity: z.coerce.number().positive(),
   solarCapacityKw: z.number().optional(),
-  solarModule: z.string().optional(),
-  inverter: z.string().optional(),
-  totalDue: z.union([z.string(), z.number()]).optional(),
-  enableNameChange: z.boolean().optional(),
+  solarModule: z.string().trim().min(2).max(120),
+  inverter: z.string().trim().min(2).max(120),
+  totalDue: z.coerce.number().nonnegative(),
 })
+
+const createSchema = customerDetailsSchema.extend({
+  enableNameChange: z.boolean().optional(),
+  enableFinance: z.boolean().optional(),
+})
+
+const ALLOWED_UPLOAD_MIMES = new Set([
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'image/png',
+  'image/jpeg',
+])
+
+function hasValidFileSignature(file) {
+  const name = file.originalname.toLowerCase()
+  const bytes = file.buffer
+  if (name.endsWith('.pdf')) return bytes.subarray(0, 4).toString() === '%PDF'
+  if (name.endsWith('.png')) {
+    return bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+  }
+  if (name.endsWith('.jpg') || name.endsWith('.jpeg')) {
+    return bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff
+  }
+  if (name.endsWith('.doc')) {
+    return bytes.subarray(0, 4).equals(Buffer.from([0xd0, 0xcf, 0x11, 0xe0]))
+  }
+  if (name.endsWith('.docx')) return bytes[0] === 0x50 && bytes[1] === 0x4b
+  return false
+}
 
 router.get(
   '/meta/categories',
@@ -103,6 +162,16 @@ router.get(
 )
 
 router.patch(
+  '/:id',
+  requireFeature('customers'),
+  asyncHandler(async (req, res) => {
+    const body = customerDetailsSchema.parse(req.body)
+    const customer = await updateCustomer(req.params.id, body, req.user)
+    res.json({ customer: redactCustomer(customer, req.user) })
+  })
+)
+
+router.patch(
   '/:id/active',
   requireFeature('inactiveCustomer'),
   asyncHandler(async (req, res) => {
@@ -124,7 +193,7 @@ router.patch(
     const body = z
       .object({
         subsidyAmount: z.number().nullable().optional(),
-        subsidyReceivedDate: z.string().nullable().optional(),
+        subsidyReceivedDate: optionalDate,
       })
       .parse(req.body)
     const customer = await updateSubsidyMeta(req.params.id, body, req.user)
@@ -144,7 +213,7 @@ router.patch(
             z.object({
               key: z.string().min(1),
               value: z.string().min(1),
-              date: z.string().nullable().optional(),
+              date: optionalDate,
             })
           )
           .optional()
@@ -156,11 +225,11 @@ router.patch(
             bankName: z.string().optional(),
             loanAmount: z.number().nullable().optional(),
             amountReceived: z.number().nullable().optional(),
-            receivedDate: z.string().nullable().optional(),
+            receivedDate: optionalDate,
           })
           .optional(),
         subsidyAmount: z.number().nullable().optional(),
-        subsidyReceivedDate: z.string().nullable().optional(),
+        subsidyReceivedDate: optionalDate,
       })
       .parse(req.body)
 
@@ -178,7 +247,7 @@ router.patch(
       .object({
         value: z.string().min(1),
         rejectionReason: z.string().optional(),
-        date: z.string().nullable().optional(),
+        date: optionalDate,
       })
       .parse(req.body)
 
@@ -255,7 +324,7 @@ router.post(
       .object({
         amount: z.coerce.number().positive(),
         mode: z.string().min(1),
-        date: z.string().min(1),
+        date: nonFutureDate,
       })
       .parse(req.body)
     const payment = await addPayment(req.params.id, body, req.user)
@@ -271,61 +340,80 @@ router.post(
     const type = z.string().parse(req.body.type || req.body.docType)
     const customName = req.body.customName || req.body.custom_name || ''
     if (!req.file) throw new HttpError(400, 'File is required')
+    if (!ALLOWED_UPLOAD_MIMES.has(req.file.mimetype) || !hasValidFileSignature(req.file)) {
+      throw new HttpError(400, 'Only PDF, DOC, DOCX, PNG, JPG, and JPEG files are allowed')
+    }
+    const preparedFile = await compressImage(req.file)
     const uploaded = await uploadFile({
       bucket: config.documentsBucket,
       folder: req.params.id,
-      file: req.file,
+      file: preparedFile,
     })
     const document = await addDocument(
       req.params.id,
-      { type, customName, fileName: uploaded.fileName, fileUrl: uploaded.url },
+      {
+        type,
+        customName,
+        fileName: uploaded.fileName,
+        fileUrl: uploaded.url,
+        storagePath: uploaded.path,
+      },
       req.user
     )
     res.status(201).json({ document })
   })
 )
 
-router.post(
-  '/:id/photos',
-  requireFeature('photos'),
-  upload.single('file'),
+router.get(
+  '/:id/documents/:documentId/view',
+  requireFeature('documents'),
   asyncHandler(async (req, res) => {
-    if (!req.file) throw new HttpError(400, 'File is required')
-    const caption = req.body.caption || ''
-    const uploaded = await uploadFile({
-      bucket: config.photosBucket,
-      folder: req.params.id,
-      file: req.file,
-    })
-    const photo = await addPhoto(
-      req.params.id,
-      { caption, fileUrl: uploaded.url },
-      req.user
+    const document = await getDocument(req.params.id, req.params.documentId)
+    const location = document.storage_path
+      ? { bucket: config.documentsBucket, objectPath: document.storage_path }
+      : storageLocationFromUrl(document.file_url, config.documentsBucket)
+    if (!location.objectPath) return res.redirect(document.file_url)
+    const viewed = await downloadFile(location)
+    res.setHeader('Content-Type', viewed.contentType || 'application/octet-stream')
+    res.setHeader(
+      'Content-Disposition',
+      `inline; filename="${document.file_name.replace(/["\r\n]/g, '_')}"`
     )
-    res.status(201).json({ photo })
+    res.send(viewed.buffer)
   })
 )
 
 router.get(
-  '/:id/history',
-  requireFeature('history'),
+  '/:id/documents/:documentId/download',
+  requireFeature('documents'),
   asyncHandler(async (req, res) => {
-    const { rows } = await query(
-      `select a.id, a.action, a.created_at, u.name as user_name
-       from activity_log a
-       left join users u on u.id = a.performed_by
-       where a.customer_id = $1
-       order by a.created_at desc`,
-      [req.params.id]
+    const document = await getDocument(req.params.id, req.params.documentId)
+    const location = document.storage_path
+      ? { bucket: config.documentsBucket, objectPath: document.storage_path }
+      : storageLocationFromUrl(document.file_url, config.documentsBucket)
+    const { objectPath } = location
+    if (!objectPath) return res.redirect(document.file_url)
+    const downloaded = await downloadFile({ bucket: location.bucket, objectPath })
+    res.setHeader('Content-Type', downloaded.contentType || 'application/octet-stream')
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${document.file_name.replace(/["\r\n]/g, '_')}"`
     )
-    res.json({
-      history: rows.map((h) => ({
-        id: h.id,
-        action: h.action,
-        user: h.user_name || 'System',
-        at: h.created_at,
-      })),
-    })
+    res.send(downloaded.buffer)
+  })
+)
+
+router.delete(
+  '/:id/documents/:documentId',
+  requireFeature('documents'),
+  asyncHandler(async (req, res) => {
+    const document = await getDocument(req.params.id, req.params.documentId)
+    const location = document.storage_path
+      ? { bucket: config.documentsBucket, objectPath: document.storage_path }
+      : storageLocationFromUrl(document.file_url, config.documentsBucket)
+    if (location.objectPath) await deleteFile(location)
+    await deleteDocumentRecord(req.params.id, req.params.documentId, req.user)
+    res.json({ ok: true })
   })
 )
 

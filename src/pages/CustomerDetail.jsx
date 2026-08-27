@@ -5,8 +5,16 @@ import StatusBadge from '../components/StatusBadge'
 import CategoryCard from '../components/CategoryCard'
 import StageTracker from '../components/StageTracker'
 import PmSuryagharPortal from '../components/PmSuryagharPortal'
-import { IconDoc, IconPlus } from '../components/Icons'
+import {
+  IconDoc,
+  IconDownload,
+  IconEdit,
+  IconTrash,
+  IconUpload,
+  IconView,
+} from '../components/Icons'
 import { useCrm } from '../context/CrmContext'
+import { crmApi } from '../api/crmApi'
 import { hasFeature } from '../data/features'
 import {
   CATEGORY_DEFS,
@@ -19,9 +27,35 @@ const TAB_DEFS = [
   { label: 'PM Suryaghar', feature: 'pmSuryaghar' },
   { label: 'Documents', feature: 'documents' },
   { label: 'Payments', feature: 'payments' },
-  { label: 'Photos', feature: 'photos' },
-  { label: 'History', feature: 'history' },
 ]
+
+const EDIT_FIELDS = [
+  { key: 'firstName', label: 'First name', required: true },
+  { key: 'middleName', label: 'Middle name' },
+  { key: 'lastName', label: 'Last name', required: true },
+  { key: 'consumerNumber', label: 'Consumer number', required: true },
+  { key: 'mobile', label: 'Mobile number', required: true, inputMode: 'numeric', maxLength: 10 },
+  { key: 'email', label: 'Email', type: 'email' },
+  { key: 'address', label: 'Address', required: true, full: true },
+  { key: 'village', label: 'Village', required: true },
+  { key: 'taluka', label: 'Taluka', required: true },
+  { key: 'district', label: 'District', required: true },
+  { key: 'pin', label: 'PIN code', required: true, inputMode: 'numeric', maxLength: 6 },
+  { key: 'electricityConnectionNo', label: 'Electricity connection / bill no.', required: true },
+  { key: 'solarCapacity', label: 'Solar capacity (kW)', required: true, type: 'number', min: '0.1', step: '0.1' },
+  { key: 'solarModule', label: 'Solar module details', required: true },
+  { key: 'inverter', label: 'On-grid inverter details', required: true },
+  { key: 'totalDue', label: 'Amount due (₹)', required: true, type: 'number', min: '0', step: '0.01' },
+]
+
+const UPLOAD_TYPES = [...DOCUMENT_TYPES, 'Photo / Image']
+const ALLOWED_EXTENSIONS = /\.(pdf|doc|docx|png|jpe?g)$/i
+
+function todayForInput() {
+  const now = new Date()
+  const offset = now.getTimezoneOffset()
+  return new Date(now.getTime() - offset * 60_000).toISOString().slice(0, 10)
+}
 
 export default function CustomerDetail() {
   const { id } = useParams()
@@ -35,7 +69,8 @@ export default function CustomerDetail() {
     disableCategory,
     addPayment,
     addDocument,
-    addPhoto,
+    deleteDocument,
+    updateCustomer,
     sessionUser,
   } = useCrm()
   const visibleTabs = TAB_DEFS.filter((t) => hasFeature(sessionUser, t.feature)).map((t) => t.label)
@@ -49,7 +84,8 @@ export default function CustomerDetail() {
   const [paymentError, setPaymentError] = useState('')
   const [docType, setDocType] = useState(DOCUMENT_TYPES[0])
   const [docCustomName, setDocCustomName] = useState('')
-  const [photoCaption, setPhotoCaption] = useState('')
+  const [editingDetails, setEditingDetails] = useState(false)
+  const [detailsDraft, setDetailsDraft] = useState(null)
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
@@ -77,11 +113,7 @@ export default function CustomerDetail() {
   }, [tab, visibleTabs])
 
   if (loading && !customer) {
-    return (
-      <Layout title="Loading…">
-        <div className="ui-surface px-5 py-10 text-center text-sm text-ink-soft">Loading customer…</div>
-      </Layout>
-    )
+    return null
   }
 
   if (!customer) {
@@ -135,6 +167,10 @@ export default function CustomerDetail() {
       setPaymentError('Enter a valid amount and date.')
       return
     }
+    if (newPayment.date > todayForInput()) {
+      setPaymentError('Payment date cannot be in the future.')
+      return
+    }
     run(async () => {
       await addPayment(customer.id, newPayment)
       setNewPayment({ amount: '', mode: PAYMENT_MODES[0], date: '' })
@@ -145,6 +181,14 @@ export default function CustomerDetail() {
     const file = e.target.files?.[0]
     e.target.value = ''
     if (!file) return
+    if (file.size > 500 * 1024) {
+      setError('File must be 500 KB or smaller.')
+      return
+    }
+    if (!ALLOWED_EXTENSIONS.test(file.name)) {
+      setError('Only PDF, DOC, DOCX, PNG, JPG, and JPEG files are allowed.')
+      return
+    }
     if (docType === 'Other' && !docCustomName.trim()) {
       setError('Enter a name for this other document.')
       return
@@ -155,12 +199,42 @@ export default function CustomerDetail() {
     })
   }
 
-  function handlePhotoUpload(e) {
-    const file = e.target.files?.[0]
-    if (!file) return
-    run(() => addPhoto(customer.id, file, photoCaption || file.name))
-    setPhotoCaption('')
-    e.target.value = ''
+  function beginEditDetails() {
+    setDetailsDraft({
+      firstName: customer.firstName,
+      middleName: customer.middleName,
+      lastName: customer.lastName,
+      consumerNumber: customer.consumerNumber,
+      mobile: customer.mobile,
+      email: customer.email,
+      address: customer.address,
+      village: customer.village,
+      taluka: customer.taluka,
+      district: customer.district,
+      pin: customer.pin,
+      electricityConnectionNo: customer.electricityConnectionNo,
+      solarCapacity: customer.solarCapacityKw || '',
+      solarModule: customer.solarModule,
+      inverter: customer.inverter,
+      totalDue: customer.totalDue,
+    })
+    setEditingDetails(true)
+  }
+
+  function saveCustomerDetails(e) {
+    e.preventDefault()
+    if (!/^[6-9]\d{9}$/.test(detailsDraft.mobile || '')) {
+      setError('Enter a valid 10-digit Indian mobile number.')
+      return
+    }
+    if (detailsDraft.email && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(detailsDraft.email)) {
+      setError('Enter a valid email address.')
+      return
+    }
+    run(async () => {
+      await updateCustomer(customer.id, detailsDraft)
+      setEditingDetails(false)
+    })
   }
 
   const loanReceived = Number(customer.categories?.finance?.amountReceived || 0)
@@ -191,7 +265,6 @@ export default function CustomerDetail() {
           {error}
         </div>
       )}
-      {busy && <div className="text-xs font-semibold text-blue-600">Saving…</div>}
       {!customer.isActive && (
         <div className="rounded-xl bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-700 ring-1 ring-slate-200">
           This customer is inactive. Reactivate the customer before continuing pipeline work.
@@ -223,6 +296,10 @@ export default function CustomerDetail() {
         <div className="flex flex-wrap items-center gap-2">
           <StatusBadge status={customer.overallStatus} />
           {!customer.isActive && <StatusBadge status="Inactive" />}
+          <button type="button" className="ui-btn-secondary" onClick={beginEditDetails}>
+            <IconEdit className="h-4 w-4" />
+            Edit details
+          </button>
           {hasFeature(sessionUser, 'inactiveCustomer') &&
             (!customer.isActive || customer.overallStatus !== 'Completed') && (
             <button
@@ -241,6 +318,47 @@ export default function CustomerDetail() {
         </div>
       </div>
 
+      {editingDetails && detailsDraft && (
+        <form onSubmit={saveCustomerDetails} className="ui-surface overflow-hidden">
+          <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+            <div>
+              <div className="text-sm font-bold text-ink">Edit customer details</div>
+              <div className="text-xs text-ink-muted">Files are managed separately under Documents.</div>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 gap-3 p-5 sm:grid-cols-2">
+            {EDIT_FIELDS.map((field) => (
+              <div key={field.key} className={field.full ? 'sm:col-span-2' : ''}>
+                <label className="ui-label">
+                  {field.label}
+                  {field.required ? ' *' : ''}
+                </label>
+                <input
+                  type={field.type || 'text'}
+                  inputMode={field.inputMode}
+                  maxLength={field.maxLength}
+                  min={field.min}
+                  step={field.step}
+                  required={field.required}
+                  value={detailsDraft[field.key] ?? ''}
+                  onChange={(e) =>
+                    setDetailsDraft((current) => ({ ...current, [field.key]: e.target.value }))
+                  }
+                />
+              </div>
+            ))}
+          </div>
+          <div className="flex gap-2 border-t border-slate-100 px-5 py-4">
+            <button type="submit" className="ui-btn-primary" disabled={busy}>
+              Save details
+            </button>
+            <button type="button" className="ui-btn-secondary" onClick={() => setEditingDetails(false)}>
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+
       <StageTracker
         customer={customer}
         onSelect={selectCategory}
@@ -255,9 +373,7 @@ export default function CustomerDetail() {
             onClick={() => setTab(t)}
             className={`whitespace-nowrap rounded-xl px-3.5 py-2 text-sm font-semibold transition ${
               tab === t
-                ? t === 'PM Suryaghar'
-                  ? 'bg-blue-600 text-white shadow-soft'
-                  : 'bg-orange-500 text-white shadow-soft'
+                ? 'bg-orange-500 text-white shadow-soft'
                 : 'text-ink-muted hover:bg-slate-50 hover:text-ink'
             }`}
           >
@@ -332,7 +448,7 @@ export default function CustomerDetail() {
                     if (e.target.value !== 'Other') setDocCustomName('')
                   }}
                 >
-                  {DOCUMENT_TYPES.map((t) => (
+                  {UPLOAD_TYPES.map((t) => (
                     <option key={t} value={t}>
                       {t}
                     </option>
@@ -349,12 +465,20 @@ export default function CustomerDetail() {
                   />
                 </div>
               )}
-              <label className="ui-btn-primary cursor-pointer">
-                <IconPlus className="h-4 w-4" />
+              <label className="ui-btn-primary cursor-pointer bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600">
+                <IconUpload className="h-4 w-4" />
                 Choose file
-                <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png" onChange={handleDocUpload} />
+                <input
+                  type="file"
+                  className="hidden"
+                  accept=".pdf,.doc,.docx,.png,.jpg,.jpeg"
+                  onChange={handleDocUpload}
+                />
               </label>
             </div>
+            <p className="mt-2 text-xs text-ink-muted">
+              PDF, DOC, DOCX, PNG, JPG, or JPEG · maximum 500 KB. Images are compressed before upload.
+            </p>
             {docType === 'Other' && (
               <p className="mt-2 text-xs text-ink-muted">Type the document name, then choose the file to upload.</p>
             )}
@@ -373,8 +497,40 @@ export default function CustomerDetail() {
                       <div className="text-xs text-ink-muted">{doc.fileName}</div>
                     </div>
                   </div>
-                  <div className="text-xs font-medium text-ink-soft">
-                    {String(doc.uploadedAt || '').slice(0, 10)}
+                  <div className="flex items-center gap-2">
+                    <span className="hidden text-xs font-medium text-ink-soft sm:inline">
+                      {String(doc.uploadedAt || '').slice(0, 10)}
+                    </span>
+                    <a
+                      href={crmApi.documentViewUrl(customer.id, doc.id)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-blue-200 bg-blue-50 text-blue-700 transition hover:bg-blue-600 hover:text-white"
+                      title="View file"
+                      aria-label={`View ${doc.fileName}`}
+                    >
+                      <IconView className="h-4 w-4" />
+                    </a>
+                    <a
+                      href={crmApi.documentDownloadUrl(customer.id, doc.id)}
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-green-200 bg-green-50 text-green-700 transition hover:bg-green-600 hover:text-white"
+                      title="Download file"
+                      aria-label={`Download ${doc.fileName}`}
+                    >
+                      <IconDownload className="h-4 w-4" />
+                    </a>
+                    <button
+                      type="button"
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-red-200 bg-red-50 text-red-700 transition hover:bg-red-600 hover:text-white"
+                      title="Delete file"
+                      aria-label={`Delete ${doc.fileName}`}
+                      onClick={() => {
+                        if (!window.confirm(`Permanently delete ${doc.fileName}?`)) return
+                        run(() => deleteDocument(customer.id, doc.id))
+                      }}
+                    >
+                      <IconTrash className="h-4 w-4" />
+                    </button>
                   </div>
                 </div>
               ))}
@@ -465,6 +621,7 @@ export default function CustomerDetail() {
                 <label className="ui-label">Date</label>
                 <input
                   type="date"
+                  max={todayForInput()}
                   value={newPayment.date}
                   onChange={(e) => setNewPayment((p) => ({ ...p, date: e.target.value }))}
                 />
@@ -478,71 +635,6 @@ export default function CustomerDetail() {
         </div>
       )}
 
-      {tab === 'Photos' && (
-        <div className="space-y-4">
-          <div className="ui-surface p-5">
-            <div className="mb-3 text-sm font-bold text-ink">Upload installation photo</div>
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-              <div className="flex-1">
-                <label className="ui-label">Caption</label>
-                <input
-                  value={photoCaption}
-                  onChange={(e) => setPhotoCaption(e.target.value)}
-                  placeholder="e.g. Panel mounting complete"
-                />
-              </div>
-              <label className="ui-btn-primary cursor-pointer">
-                <IconPlus className="h-4 w-4" />
-                Choose photo
-                <input type="file" className="hidden" accept="image/*" onChange={handlePhotoUpload} />
-              </label>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {(customer.photos || []).map((p) => (
-              <div key={p.id} className="ui-surface overflow-hidden p-3">
-                {p.fileUrl ? (
-                  <img
-                    src={p.fileUrl}
-                    alt={p.caption || 'Installation'}
-                    className="mb-3 h-32 w-full rounded-xl object-cover ring-1 ring-slate-100"
-                  />
-                ) : (
-                  <div className="mb-3 flex h-32 items-center justify-center rounded-xl bg-gradient-to-br from-orange-50 via-blue-50 to-green-50 text-xs font-semibold text-ink-muted ring-1 ring-slate-100">
-                    Installation photo
-                  </div>
-                )}
-                <div className="text-sm font-semibold text-ink">{p.caption}</div>
-                <div className="text-xs text-ink-soft">{String(p.uploadedAt || '').slice(0, 10)}</div>
-              </div>
-            ))}
-            {(customer.photos || []).length === 0 && (
-              <div className="ui-surface col-span-full px-5 py-10 text-center text-sm text-ink-soft">
-                No installation photos uploaded yet.
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {tab === 'History' && (
-        <div className="ui-surface overflow-hidden">
-          <div className="divide-y divide-slate-100">
-            {[...(customer.history || [])].map((h) => (
-              <div key={h.id} className="flex gap-3 px-5 py-4">
-                <div className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full bg-orange-400" />
-                <div>
-                  <div className="text-sm font-semibold text-ink">{h.action}</div>
-                  <div className="text-xs text-ink-muted">
-                    {h.user} · {String(h.at || '').replace('T', ' ').slice(0, 16)}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
     </Layout>
   )
 }

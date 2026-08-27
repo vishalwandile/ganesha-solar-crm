@@ -37,6 +37,7 @@ create table users (
   id uuid primary key default gen_random_uuid(),
   name text not null,
   username text not null unique,
+  mobile text,
   password_hash text not null,
   team team_name not null,
   is_admin boolean not null default false,
@@ -204,6 +205,7 @@ create table documents (
   custom_name text,
   file_name text not null,
   file_url text not null, -- Supabase Storage object path/URL
+  storage_path text,
   uploaded_by uuid references users(id),
   uploaded_at timestamptz not null default now()
 );
@@ -212,6 +214,7 @@ create table photos (
   id uuid primary key default gen_random_uuid(),
   customer_id uuid not null references customers(id) on delete cascade,
   file_url text not null,
+  storage_path text,
   caption text,
   uploaded_by uuid references users(id),
   uploaded_at timestamptz not null default now()
@@ -282,3 +285,35 @@ create trigger trg_customer_categories_updated_at
 create trigger trg_customer_sub_stages_updated_at
   before update on customer_sub_stages
   for each row execute function set_updated_at();
+
+-- ============================================================
+-- 11. Row Level Security
+-- ============================================================
+-- The CRM never queries these tables through PostgREST (anon / authenticated).
+-- All reads and writes go through the Node API using DATABASE_URL, which
+-- bypasses RLS. Enable RLS with no policies so the public API cannot
+-- read customers, users, passwords, or documents.
+do $$
+declare
+  t text;
+begin
+  foreach t in array array[
+    'users',
+    'teams',
+    'user_category_permissions',
+    'stage_definitions',
+    'category_definitions',
+    'customers',
+    'customer_categories',
+    'customer_sub_stages',
+    'documents',
+    'photos',
+    'payments',
+    'activity_log',
+    'notifications'
+  ]
+  loop
+    execute format('alter table if exists public.%I enable row level security', t);
+    execute format('revoke all on table public.%I from anon, authenticated', t);
+  end loop;
+end $$;

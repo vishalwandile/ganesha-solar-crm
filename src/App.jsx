@@ -7,7 +7,6 @@ import CustomerList from './pages/CustomerList'
 import CreateCustomer from './pages/CreateCustomer'
 import CustomerDetail from './pages/CustomerDetail'
 import Users from './pages/Users'
-import Notifications from './pages/Notifications'
 
 function FeatureRoute({ feature, children }) {
   const { sessionUser } = useCrm()
@@ -21,13 +20,7 @@ export default function App() {
   const { sessionUser, hydrated } = useCrm()
 
   if (!hydrated) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-mesh">
-        <div className="rounded-2xl bg-white px-6 py-4 text-sm font-semibold text-ink shadow-soft">
-          Loading CRM…
-        </div>
-      </div>
-    )
+    return null
   }
 
   if (!sessionUser) {
@@ -79,14 +72,6 @@ export default function App() {
         element={
           <FeatureRoute feature="users">
             <Users />
-          </FeatureRoute>
-        }
-      />
-      <Route
-        path="/notifications"
-        element={
-          <FeatureRoute feature="notifications">
-            <Notifications />
           </FeatureRoute>
         }
       />

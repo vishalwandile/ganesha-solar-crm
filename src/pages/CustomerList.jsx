@@ -2,9 +2,22 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import Layout from '../components/Layout'
 import StatusBadge from '../components/StatusBadge'
-import { IconPlus, IconSearch } from '../components/Icons'
+import { IconClose, IconPlus, IconSearch, IconView } from '../components/Icons'
 import { useCrm } from '../context/CrmContext'
 import { hasFeature } from '../data/features'
+
+function formatDate(value) {
+  if (!value) return '—'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '—'
+  return new Intl.DateTimeFormat('en-GB', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  })
+    .format(date)
+    .replaceAll('/', '-')
+}
 
 export default function CustomerList() {
   const { customers, customerPagination, refreshCustomers, sessionUser } = useCrm()
@@ -30,18 +43,43 @@ export default function CustomerList() {
 
   return (
     <Layout title="Customers" subtitle="Search and manage solar consumers">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="relative max-w-md flex-1">
-          <IconSearch className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-soft" />
-          <input
-            value={query}
-            onChange={(e) => {
-              setQuery(e.target.value)
-              setPage(1)
-            }}
-            placeholder="Search by name or consumer number"
-            className="pl-10"
-          />
+      <div className="ui-surface flex flex-col gap-4 p-4 sm:flex-row sm:items-end sm:justify-between">
+        <div className="w-full max-w-xl">
+          <label htmlFor="customer-search" className="ui-label">
+            Find a customer
+          </label>
+          <div className="relative">
+            <IconSearch className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-blue-600" />
+            <input
+              id="customer-search"
+              type="search"
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value)
+                setPage(1)
+              }}
+              placeholder="Name, consumer number, or mobile"
+              className="h-12 pl-12 pr-11"
+            />
+            {query && (
+              <button
+                type="button"
+                onClick={() => {
+                  setQuery('')
+                  setPage(1)
+                }}
+                className="absolute right-2 top-1/2 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-lg text-ink-soft transition hover:bg-slate-100 hover:text-ink"
+                aria-label="Clear search"
+              >
+                <IconClose className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+          <p className="mt-1.5 text-xs text-ink-soft">
+            {query.trim()
+              ? `${customerPagination.total} matching customer${customerPagination.total === 1 ? '' : 's'}`
+              : `${customerPagination.total} total customer${customerPagination.total === 1 ? '' : 's'}`}
+          </p>
         </div>
         {hasFeature(sessionUser, 'createCustomer') && (
           <Link to="/customers/new" className="ui-btn-primary shrink-0">
@@ -53,7 +91,7 @@ export default function CustomerList() {
 
       <div className="ui-surface overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[720px] text-sm">
+          <table className="w-full min-w-[860px] text-sm">
             <thead>
               <tr className="border-b border-slate-100 bg-slate-50/80 text-left">
                 <th className="px-5 py-3.5 text-xs font-bold uppercase tracking-wide text-ink-muted">Name</th>
@@ -62,9 +100,15 @@ export default function CustomerList() {
                 </th>
                 <th className="px-5 py-3.5 text-xs font-bold uppercase tracking-wide text-ink-muted">Mobile</th>
                 <th className="px-5 py-3.5 text-xs font-bold uppercase tracking-wide text-ink-muted">
+                  Created date
+                </th>
+                <th className="px-5 py-3.5 text-xs font-bold uppercase tracking-wide text-ink-muted">
                   Capacity
                 </th>
                 <th className="px-5 py-3.5 text-xs font-bold uppercase tracking-wide text-ink-muted">Status</th>
+                <th className="px-5 py-3.5 text-right text-xs font-bold uppercase tracking-wide text-ink-muted">
+                  View
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -77,6 +121,7 @@ export default function CustomerList() {
                   </td>
                   <td className="px-5 py-3.5 font-medium text-ink-muted">{c.consumerNumber}</td>
                   <td className="px-5 py-3.5 text-ink-muted">{c.mobile}</td>
+                  <td className="px-5 py-3.5 tabular-nums text-ink-muted">{formatDate(c.createdAt)}</td>
                   <td className="px-5 py-3.5">
                     <span className="rounded-lg bg-green-50 px-2 py-1 text-xs font-bold text-green-700 ring-1 ring-green-100">
                       {c.solarCapacity || '—'}
@@ -88,19 +133,22 @@ export default function CustomerList() {
                       {!c.isActive && <StatusBadge status="Inactive" />}
                     </div>
                   </td>
+                  <td className="px-5 py-3.5 text-right">
+                    <Link
+                      to={`/customers/${c.id}`}
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-blue-200 bg-blue-50 text-blue-700 transition hover:bg-blue-600 hover:text-white"
+                      aria-label={`View ${c.name}`}
+                      title="View customer"
+                    >
+                      <IconView className="h-4 w-4" />
+                    </Link>
+                  </td>
                 </tr>
               ))}
               {!loading && customers.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-5 py-10 text-center text-sm text-ink-soft">
+                  <td colSpan={7} className="px-5 py-10 text-center text-sm text-ink-soft">
                     No customers match your search.
-                  </td>
-                </tr>
-              )}
-              {loading && (
-                <tr>
-                  <td colSpan={5} className="px-5 py-10 text-center text-sm text-ink-soft">
-                    Loading customers…
                   </td>
                 </tr>
               )}
@@ -109,7 +157,7 @@ export default function CustomerList() {
         </div>
         <div className="flex flex-col gap-2 border-t border-slate-100 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
           <span className="text-xs text-ink-muted">
-            {customerPagination.total} customer{customerPagination.total === 1 ? '' : 's'} · newest first
+            {customerPagination.total} customer{customerPagination.total === 1 ? '' : 's'}
           </span>
           <div className="flex items-center gap-2">
             <button

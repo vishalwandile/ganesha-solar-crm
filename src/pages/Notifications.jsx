@@ -1,9 +1,11 @@
 import { useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import Layout from '../components/Layout'
 import { IconBell } from '../components/Icons'
 import { useCrm } from '../context/CrmContext'
 
 export default function Notifications() {
+  const navigate = useNavigate()
   const {
     notifications,
     unreadNotificationCount,
@@ -11,9 +13,30 @@ export default function Notifications() {
     markAllNotificationsRead,
     markNotificationRead,
   } = useCrm()
+
   useEffect(() => {
-    refreshNotifications().catch(() => {})
-  }, [refreshNotifications])
+    let active = true
+    refreshNotifications()
+      .then((items) => {
+        if (active && items.some((item) => !item.read)) {
+          return markAllNotificationsRead()
+        }
+        return null
+      })
+      .catch(() => {})
+    return () => {
+      active = false
+    }
+  }, [refreshNotifications, markAllNotificationsRead])
+
+  async function openNotification(notification) {
+    if (!notification.read) {
+      await markNotificationRead(notification.id).catch(() => {})
+    }
+    if (notification.customerId) {
+      navigate(`/customers/${notification.customerId}`)
+    }
+  }
 
   return (
     <Layout title="Notifications" subtitle="Stage changes and important updates">
@@ -26,9 +49,7 @@ export default function Notifications() {
             <span className="font-bold text-ink">{unreadNotificationCount}</span> unread
           </span>
         </div>
-        <button type="button" onClick={() => markAllNotificationsRead()} className="ui-btn-secondary">
-          Mark all as read
-        </button>
+        <span className="text-xs font-medium text-ink-soft">Notifications are marked read when viewed</span>
       </div>
 
       <div className="ui-surface overflow-hidden">
@@ -37,7 +58,7 @@ export default function Notifications() {
             <button
               key={n.id}
               type="button"
-              onClick={() => markNotificationRead(n.id)}
+              onClick={() => openNotification(n)}
               className={`flex w-full items-start gap-3 px-5 py-4 text-left transition hover:bg-slate-50 ${
                 n.read ? 'bg-white' : 'bg-gradient-to-r from-orange-50/70 to-transparent'
               }`}
