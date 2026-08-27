@@ -1,0 +1,99 @@
+# Automatic off-site backups (private repo).
+#
+# Runs by itself once this file is on the default branch (main) and secrets exist:
+#   DATABASE_URL
+#   STORAGE_S3_ENDPOINT, STORAGE_S3_REGION,
+#   STORAGE_S3_ACCESS_KEY_ID, STORAGE_S3_SECRET_ACCESS_KEY
+#   SUPABASE_DOCUMENTS_BUCKET
+# Optional: DIRECT_DATABASE_URL
+#
+# Schedule (UTC):
+#   Daily 18:00  → SQL only
+#   Sunday 20:00 → SQL + storage files
+# Manual: Actions → Backup production → Run workflow
+
+name: Backup production
+
+on:
+  schedule:
+    - cron: '0 18 * * *'
+    - cron: '0 20 * * 0'
+  workflow_dispatch:
+    inputs:
+      with_files:
+        description: 'Also download and zip storage files'
+        type: boolean
+        default: false
+
+concurrency:
+  group: production-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Decide SQL-only vs files
+        id: mode
+        run: |
+          with_files=false
+          if [ "${{ github.event_name }}" = "schedule" ] && [ "${{ github.event.schedule }}" = "0 20 * * 0" ]; then
+            with_files=true
+          fi
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.with_files }}" = "true" ]; then
+            with_files=true
+          fi
+          echo "with_files=$with_files" >> "$GITHUB_OUTPUT"
+
+      - name: Check required secrets
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "Add repository secret DATABASE_URL (Settings → Secrets and variables → Actions)."
+            exit 1
+          fi
+
+      - name: Install pg_dump
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install API deps
+        run: npm ci
+        working-directory: backend
+
+      - name: Run backup
+        working-directory: backend
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_DATABASE_URL: ${{ secrets.DIRECT_DATABASE_URL }}
+          STORAGE_S3_ENDPOINT: ${{ secrets.STORAGE_S3_ENDPOINT }}
+          STORAGE_S3_REGION: ${{ secrets.STORAGE_S3_REGION }}
+          STORAGE_S3_ACCESS_KEY_ID: ${{ secrets.STORAGE_S3_ACCESS_KEY_ID }}
+          STORAGE_S3_SECRET_ACCESS_KEY: ${{ secrets.STORAGE_S3_SECRET_ACCESS_KEY }}
+          SUPABASE_DOCUMENTS_BUCKET: ${{ secrets.SUPABASE_DOCUMENTS_BUCKET }}
+          BACKUP_KEEP: '3'
+        run: |
+          if [ "${{ steps.mode.outputs.with_files }}" = "true" ]; then
+            npm run backup
+          else
+            npm run backup:db
+          fi
+
+      - name: Upload artifact (retained 90 days)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ganesha-crm-backup-${{ github.run_id }}
+          path: backend/backups/crm-*
+          if-no-files-found: error
+          retention-days: 90

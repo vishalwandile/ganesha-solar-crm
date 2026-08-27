@@ -14,7 +14,10 @@
     "db:push": "node src/scripts/applySchema.js",
     "db:push:uat": "APP_ENV=uat node src/scripts/applySchema.js",
     "db:migrate": "node src/scripts/migrate.js",
-    "db:migrate:uat": "APP_ENV=uat node src/scripts/migrate.js"
+    "db:migrate:uat": "APP_ENV=uat node src/scripts/migrate.js",
+    "backup": "node src/scripts/backup.js",
+    "backup:uat": "APP_ENV=uat node src/scripts/backup.js",
+    "backup:db": "node src/scripts/backup.js --db-only"
   },
   "keywords": [],
   "author": "",

@@ -9,4 +9,8 @@ backend/.env.*
 !backend/.env.example
 !backend/.env.uat.example
 backend/uploads
+backend/backups
 *.log
+
+# Live passwords and S3 keys — share privately, do not commit
+docs/PROJECT_HANDOVER.md
