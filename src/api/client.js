@@ -48,6 +48,35 @@ export class ApiError extends Error {
   }
 }
 
+// Files are fetched with the bearer token rather than linked directly, because
+// browsers do not send Authorization headers (or third-party cookies) on
+// <a href> navigations to a different site.
+export async function apiBlob(path) {
+  beginRequest()
+  try {
+    const headers = new Headers()
+    const token = getToken()
+    if (token) headers.set('Authorization', `Bearer ${token}`)
+
+    const res = await fetch(`${API_BASE}${path}`, { headers, credentials: 'include' })
+
+    if (!res.ok) {
+      let message = res.statusText || 'Request failed'
+      try {
+        const data = await res.json()
+        if (data?.error) message = data.error
+      } catch {
+        /* non-JSON error body */
+      }
+      throw new ApiError(message, res.status)
+    }
+
+    return { blob: await res.blob() }
+  } finally {
+    endRequest()
+  }
+}
+
 export async function apiRequest(path, options = {}) {
   beginRequest()
   try {

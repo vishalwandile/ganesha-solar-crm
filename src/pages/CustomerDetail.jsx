@@ -199,6 +199,41 @@ export default function CustomerDetail() {
     })
   }
 
+  function saveBlobAs(url, fileName) {
+    const link = document.createElement('a')
+    link.href = url
+    link.download = fileName || 'document'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+  }
+
+  async function viewDocument(doc) {
+    // Opened before awaiting so the click is still treated as a user gesture.
+    const tab = window.open('', '_blank')
+    try {
+      const { blob } = await crmApi.fetchDocumentBlob(customer.id, doc.id, 'view')
+      const url = URL.createObjectURL(blob)
+      if (tab) tab.location = url
+      else saveBlobAs(url, doc.fileName)
+      setTimeout(() => URL.revokeObjectURL(url), 60000)
+    } catch (err) {
+      if (tab) tab.close()
+      setError(err.message || 'Could not open this file')
+    }
+  }
+
+  async function downloadDocument(doc) {
+    try {
+      const { blob } = await crmApi.fetchDocumentBlob(customer.id, doc.id, 'download')
+      const url = URL.createObjectURL(blob)
+      saveBlobAs(url, doc.fileName)
+      setTimeout(() => URL.revokeObjectURL(url), 60000)
+    } catch (err) {
+      setError(err.message || 'Could not download this file')
+    }
+  }
+
   function beginEditDetails() {
     setDetailsDraft({
       firstName: customer.firstName,
@@ -501,24 +536,24 @@ export default function CustomerDetail() {
                     <span className="hidden text-xs font-medium text-ink-soft sm:inline">
                       {String(doc.uploadedAt || '').slice(0, 10)}
                     </span>
-                    <a
-                      href={crmApi.documentViewUrl(customer.id, doc.id)}
-                      target="_blank"
-                      rel="noreferrer"
+                    <button
+                      type="button"
+                      onClick={() => viewDocument(doc)}
                       className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-blue-200 bg-blue-50 text-blue-700 transition hover:bg-blue-600 hover:text-white"
                       title="View file"
                       aria-label={`View ${doc.fileName}`}
                     >
                       <IconView className="h-4 w-4" />
-                    </a>
-                    <a
-                      href={crmApi.documentDownloadUrl(customer.id, doc.id)}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => downloadDocument(doc)}
                       className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-green-200 bg-green-50 text-green-700 transition hover:bg-green-600 hover:text-white"
                       title="Download file"
                       aria-label={`Download ${doc.fileName}`}
                     >
                       <IconDownload className="h-4 w-4" />
-                    </a>
+                    </button>
                     <button
                       type="button"
                       className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-red-200 bg-red-50 text-red-700 transition hover:bg-red-600 hover:text-white"

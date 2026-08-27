@@ -1,4 +1,4 @@
-import { apiRequest, getApiUrl, setToken } from './client.js'
+import { apiBlob, apiRequest, setToken } from './client.js'
 
 export const crmApi = {
   login(username, password) {
@@ -113,12 +113,8 @@ export const crmApi = {
     })
   },
 
-  documentDownloadUrl(customerId, documentId) {
-    return getApiUrl(`/api/customers/${customerId}/documents/${documentId}/download`)
-  },
-
-  documentViewUrl(customerId, documentId) {
-    return getApiUrl(`/api/customers/${customerId}/documents/${documentId}/view`)
+  fetchDocumentBlob(customerId, documentId, mode = 'view') {
+    return apiBlob(`/api/customers/${customerId}/documents/${documentId}/${mode}`)
   },
 
   listUsers() {
