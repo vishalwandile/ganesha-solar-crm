@@ -20,15 +20,20 @@ function s3Enabled() {
   )
 }
 
-// A configured endpoint with missing keys means someone forgot to fill in the
-// credentials. Fail loudly instead of silently writing to the local disk, which
-// looks like success but leaves files off the bucket.
+export function remoteStorageEnabled() {
+  return s3Enabled() || supabaseEnabled()
+}
+
+// The local-disk branch below is a development convenience only. On a hosted
+// server the disk is ephemeral, so falling back to it looks like a successful
+// upload while every file disappears on the next deploy. Fail loudly instead,
+// both when credentials are half-filled and whenever we run in production.
 function assertStorageConfigured() {
-  if (s3Enabled() || supabaseEnabled()) return
-  if (config.storageEndpoint || config.supabaseUrl) {
+  if (remoteStorageEnabled()) return
+  if (config.storageEndpoint || config.supabaseUrl || config.nodeEnv === 'production') {
     throw new HttpError(
       500,
-      'Storage is misconfigured: set STORAGE_S3_ACCESS_KEY_ID and STORAGE_S3_SECRET_ACCESS_KEY (or SUPABASE_SERVICE_ROLE_KEY) for this environment'
+      'Storage is not configured: set STORAGE_S3_ENDPOINT, STORAGE_S3_ACCESS_KEY_ID and STORAGE_S3_SECRET_ACCESS_KEY (or SUPABASE_SERVICE_ROLE_KEY) for this environment'
     )
   }
 }
@@ -174,15 +179,24 @@ export async function uploadFile({ bucket, folder, file }) {
   }
 }
 
+// A missing object is not a failure to delete: the caller still needs the
+// database row removed, otherwise records whose file was already lost can never
+// be cleared from the UI.
 export async function deleteFile({ bucket, objectPath }) {
   if (!objectPath) return
   if (s3Enabled()) {
-    await sendToS3(new DeleteObjectCommand({ Bucket: bucket, Key: objectPath }), 'delete')
+    try {
+      await sendToS3(new DeleteObjectCommand({ Bucket: bucket, Key: objectPath }), 'delete')
+    } catch (err) {
+      if (err?.status !== 404) throw err
+    }
     return
   }
   if (supabaseEnabled()) {
     const { error } = await getSupabase().storage.from(bucket).remove([objectPath])
-    if (error) throw new HttpError(500, `Storage delete failed: ${error.message}`)
+    if (error && !/not.?found/i.test(error.message)) {
+      throw new HttpError(500, `Storage delete failed: ${error.message}`)
+    }
     return
   }
   const fullPath = path.resolve(uploadsRoot, bucket, objectPath)

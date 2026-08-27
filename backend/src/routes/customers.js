@@ -29,6 +29,7 @@ import {
   compressImage,
   deleteFile,
   downloadFile,
+  remoteStorageEnabled,
   storageLocationFromUrl,
   uploadFile,
 } from '../services/storage.js'
@@ -37,6 +38,22 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 500 * 1024, files: 1 },
 })
+
+function documentLocation(document) {
+  if (document.storage_path) {
+    return { bucket: config.documentsBucket, objectPath: document.storage_path }
+  }
+  // Rows written while the server had no storage credentials point at the local
+  // uploads folder. On a hosted server that disk is gone, so say so plainly
+  // instead of surfacing a bucket "NoSuchKey".
+  if (remoteStorageEnabled() && /^\/uploads\//.test(String(document.file_url || ''))) {
+    throw new HttpError(
+      404,
+      'This file was uploaded before file storage was configured and is no longer available. Please upload it again.'
+    )
+  }
+  return storageLocationFromUrl(document.file_url, config.documentsBucket)
+}
 
 const router = Router()
 
@@ -369,9 +386,7 @@ router.get(
   requireFeature('documents'),
   asyncHandler(async (req, res) => {
     const document = await getDocument(req.params.id, req.params.documentId)
-    const location = document.storage_path
-      ? { bucket: config.documentsBucket, objectPath: document.storage_path }
-      : storageLocationFromUrl(document.file_url, config.documentsBucket)
+    const location = documentLocation(document)
     if (!location.objectPath) return res.redirect(document.file_url)
     const viewed = await downloadFile(location)
     res.setHeader('Content-Type', viewed.contentType || 'application/octet-stream')
@@ -388,9 +403,7 @@ router.get(
   requireFeature('documents'),
   asyncHandler(async (req, res) => {
     const document = await getDocument(req.params.id, req.params.documentId)
-    const location = document.storage_path
-      ? { bucket: config.documentsBucket, objectPath: document.storage_path }
-      : storageLocationFromUrl(document.file_url, config.documentsBucket)
+    const location = documentLocation(document)
     const { objectPath } = location
     if (!objectPath) return res.redirect(document.file_url)
     const downloaded = await downloadFile({ bucket: location.bucket, objectPath })
@@ -408,9 +421,13 @@ router.delete(
   requireFeature('documents'),
   asyncHandler(async (req, res) => {
     const document = await getDocument(req.params.id, req.params.documentId)
-    const location = document.storage_path
-      ? { bucket: config.documentsBucket, objectPath: document.storage_path }
-      : storageLocationFromUrl(document.file_url, config.documentsBucket)
+    // A file that is already gone must still be removable from the list.
+    let location = { objectPath: null }
+    try {
+      location = documentLocation(document)
+    } catch (err) {
+      if (err?.status !== 404) throw err
+    }
     if (location.objectPath) await deleteFile(location)
     await deleteDocumentRecord(req.params.id, req.params.documentId, req.user)
     res.json({ ok: true })
