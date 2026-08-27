@@ -50,7 +50,7 @@ export async function requireAuth(req, res, next) {
     }
 
     const { rows } = await query(
-      `select id, name, username, team, is_admin, is_active, features, created_at
+      `select id, name, username, team, is_admin, is_system_admin, is_active, features, created_at
        from users where id = $1 and is_active = true`,
       [payload.sub]
     )

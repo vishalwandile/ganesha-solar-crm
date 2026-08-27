@@ -23,6 +23,45 @@ async function main() {
     await client.query(`alter table customers add column if not exists is_active boolean not null default true`)
     await client.query(`alter table users add column if not exists is_active boolean not null default true`)
     await client.query(`alter table users add column if not exists mobile text`)
+    await client.query(
+      `alter table users add column if not exists is_system_admin boolean not null default false`
+    )
+    await client.query(`
+      update users
+      set is_system_admin = (username = 'vishal.wandile')
+      where is_system_admin is distinct from (username = 'vishal.wandile')
+    `)
+    await client.query(`
+      create unique index if not exists users_single_system_admin
+      on users (is_system_admin)
+      where is_system_admin = true
+    `)
+    await client.query(`
+      create or replace function protect_system_admin()
+      returns trigger
+      language plpgsql
+      as $$
+      begin
+        if tg_op = 'DELETE' and old.is_system_admin then
+          raise exception 'The system administrator account cannot be deleted';
+        end if;
+        if tg_op = 'UPDATE'
+           and old.is_system_admin
+           and (not new.is_system_admin or not new.is_active) then
+          raise exception 'The system administrator account cannot be deactivated or unprotected';
+        end if;
+        if tg_op = 'DELETE' then
+          return old;
+        end if;
+        return new;
+      end;
+      $$;
+
+      drop trigger if exists users_protect_system_admin on users;
+      create trigger users_protect_system_admin
+      before update or delete on users
+      for each row execute function protect_system_admin();
+    `)
     await client.query(`alter table customers add column if not exists first_name text`)
     await client.query(`alter table customers add column if not exists middle_name text`)
     await client.query(`alter table customers add column if not exists last_name text`)

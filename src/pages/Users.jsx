@@ -285,7 +285,14 @@ export default function Users() {
                     .slice(0, 2)}
                 </div>
                 <div>
-                  <div className="text-sm font-bold text-ink">{u.name}</div>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <div className="text-sm font-bold text-ink">{u.name}</div>
+                    {u.isSystemAdmin && (
+                      <span className="rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-700 ring-1 ring-amber-200">
+                        System Admin
+                      </span>
+                    )}
+                  </div>
                   <div className="text-xs text-ink-muted">@{u.username}</div>
                   {u.mobile && <div className="mt-0.5 text-xs text-ink-muted">{u.mobile}</div>}
                 </div>
@@ -348,7 +355,7 @@ export default function Users() {
                 Edit access
               </button>
             )}
-            {sessionUser?.isAdmin && u.id !== sessionUser.id && (
+            {sessionUser?.isAdmin && !u.isSystemAdmin && u.id !== sessionUser.id && (
               <button
                 type="button"
                 className="mt-3 text-xs font-bold text-red-600 hover:text-red-700"

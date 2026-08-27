@@ -78,16 +78,25 @@ async function main() {
       const hash = await bcrypt.hash(u.password, 10)
       const features = JSON.stringify(defaultFeaturesForTeam(u.team))
       const { rows } = await client.query(
-        `insert into users (name, username, password_hash, team, is_admin, features)
-         values ($1, $2, $3, $4, $5, $6::jsonb)
+        `insert into users (name, username, password_hash, team, is_admin, is_system_admin, features)
+         values ($1, $2, $3, $4, $5, $6, $7::jsonb)
          on conflict (username) do update
            set name = excluded.name,
                password_hash = excluded.password_hash,
                team = excluded.team,
                is_admin = excluded.is_admin,
+               is_system_admin = excluded.is_system_admin,
                features = excluded.features
          returning id, username`,
-        [u.name, u.username, hash, u.team, u.isAdmin, features]
+        [
+          u.name,
+          u.username,
+          hash,
+          u.team,
+          u.isAdmin,
+          u.username === 'vishal.wandile',
+          features,
+        ]
       )
       const userId = rows[0].id
       await client.query(`delete from user_category_permissions where user_id = $1`, [userId])

@@ -45,6 +45,7 @@ function mapUser(row, permissions = []) {
     mobile: row.mobile || '',
     team: row.team,
     isAdmin: row.is_admin,
+    isSystemAdmin: row.is_system_admin,
     createdAt: row.created_at,
     features: resolveFeatures(row),
     permissions: permissions.map((p) => ({
@@ -59,7 +60,7 @@ router.get(
   requireFeature('users'),
   asyncHandler(async (_req, res) => {
     const { rows } = await query(
-      `select id, name, username, mobile, team, is_admin, features, created_at
+      `select id, name, username, mobile, team, is_admin, is_system_admin, features, created_at
        from users where is_active = true order by created_at`
     )
     const perms = await query(`select user_id, category, can_edit from user_category_permissions`)
@@ -89,7 +90,7 @@ router.post(
       const { rows } = await client.query(
         `insert into users (name, username, mobile, password_hash, team, is_admin, features)
          values ($1, $2, $3, $4, $5, $6, $7::jsonb)
-         returning id, name, username, mobile, team, is_admin, features, created_at`,
+         returning id, name, username, mobile, team, is_admin, is_system_admin, features, created_at`,
         [
           body.name.trim(),
           body.username.trim(),
@@ -126,11 +127,14 @@ router.delete(
       throw new HttpError(409, 'You cannot delete your own account')
     }
     const { rows } = await query(
-      `select id, is_admin from users where id = $1 and is_active = true`,
+      `select id, is_admin, is_system_admin from users where id = $1 and is_active = true`,
       [req.params.id]
     )
     const target = rows[0]
     if (!target) throw new HttpError(404, 'User not found')
+    if (target.is_system_admin) {
+      throw new HttpError(403, 'The system administrator account cannot be deleted')
+    }
 
     if (target.is_admin) {
       const admins = await query(

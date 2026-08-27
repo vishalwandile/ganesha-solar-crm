@@ -57,7 +57,7 @@ export default function Login() {
           <input
             value={username}
             onChange={(e) => setUsername(e.target.value)}
-            placeholder="vishal.wandile"
+            placeholder="Enter username"
             autoComplete="username"
           />
         </div>
@@ -82,10 +82,6 @@ export default function Login() {
           Sign in
         </button>
 
-        <p className="mt-5 text-center text-xs text-ink-soft">
-          Use seeded account <span className="font-semibold">vishal.wandile</span> /{' '}
-          <span className="font-semibold">admin123</span>
-        </p>
         <p className="mt-4 text-center text-[11px] text-ink-soft">
           © {new Date().getFullYear()} Ganesha Solar Services. All rights reserved.
         </p>

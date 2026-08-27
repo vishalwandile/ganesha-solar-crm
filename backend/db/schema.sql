@@ -41,10 +41,39 @@ create table users (
   password_hash text not null,
   team team_name not null,
   is_admin boolean not null default false,
+  is_system_admin boolean not null default false,
   is_active boolean not null default true,
   features jsonb not null default '[]'::jsonb,
   created_at timestamptz not null default now()
 );
+
+create unique index users_single_system_admin
+  on users (is_system_admin)
+  where is_system_admin = true;
+
+create or replace function protect_system_admin()
+returns trigger
+language plpgsql
+as $$
+begin
+  if tg_op = 'DELETE' and old.is_system_admin then
+    raise exception 'The system administrator account cannot be deleted';
+  end if;
+  if tg_op = 'UPDATE'
+     and old.is_system_admin
+     and (not new.is_system_admin or not new.is_active) then
+    raise exception 'The system administrator account cannot be deactivated or unprotected';
+  end if;
+  if tg_op = 'DELETE' then
+    return old;
+  end if;
+  return new;
+end;
+$$;
+
+create trigger users_protect_system_admin
+before update or delete on users
+for each row execute function protect_system_admin();
 
 create table teams (
   name team_name primary key,

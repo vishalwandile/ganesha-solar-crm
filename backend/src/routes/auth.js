@@ -24,7 +24,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const body = loginSchema.parse(req.body)
     const { rows } = await query(
-      `select id, name, username, password_hash, team, is_admin, features
+      `select id, name, username, password_hash, team, is_admin, is_system_admin, features
        from users where username = $1 and is_active = true`,
       [body.username.trim()]
     )
@@ -51,6 +51,7 @@ router.post(
         username: user.username,
         team: user.team,
         isAdmin: user.is_admin,
+        isSystemAdmin: user.is_system_admin,
         features: resolveFeatures(user),
         permissions: perms.rows.map((p) => ({
           category: toFeCategory(p.category),
@@ -82,6 +83,7 @@ router.get(
         username: req.user.username,
         team: req.user.team,
         isAdmin: req.user.is_admin,
+        isSystemAdmin: req.user.is_system_admin,
         features: resolveFeatures(req.user),
         permissions: perms.rows.map((p) => ({
           category: toFeCategory(p.category),
