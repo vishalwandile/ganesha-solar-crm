@@ -99,7 +99,7 @@ insert into stage_definitions (category, sub_stage_key, label, sort_order, optio
   ('name_change', 'doc_received',   'Document Received',    1, array['Pending','Completed']),
   ('name_change', 'app_submitted',  'Application Submitted',2, array['Pending','Completed']),
   ('name_change', 'demand',         'Demand',                3, array['Pending','Completed']),
-  ('name_change', 'application',    'Application',           4, array['Approved','Rejected']),
+  ('name_change', 'application',    'Application',           4, array['Pending','Approved','Rejected']),
 
   ('rooftop_solar', 'app_submitted','Application Submitted', 1, array['Pending','Completed']),
 

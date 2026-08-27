@@ -35,7 +35,7 @@ export const CATEGORY_DEFS = [
       { key: 'docReceived', label: 'Document received', options: ['Pending', 'Completed'] },
       { key: 'appSubmitted', label: 'Application submitted', options: ['Pending', 'Completed'] },
       { key: 'demand', label: 'Demand', options: ['Pending', 'Completed'] },
-      { key: 'application', label: 'Application', options: ['Approved', 'Rejected'] },
+      { key: 'application', label: 'Application', options: ['Pending', 'Approved', 'Rejected'] },
     ],
   },
   {

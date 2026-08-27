@@ -52,6 +52,10 @@ values ('Admin'), ('Installation'), ('Sales'), ('Office'), ('Account'), ('Loan')
 on conflict (name) do nothing;
 
 update category_definitions set is_optional = true where category = 'finance';
+
+update stage_definitions
+set options = array['Pending','Approved','Rejected']
+where category = 'name_change' and sub_stage_key = 'application';
 -- 'On Hold' only exists on older databases; skip when the enum lacks it.
 do $$
 begin
