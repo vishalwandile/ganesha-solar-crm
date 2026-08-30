@@ -240,9 +240,13 @@ router.patch(
         extra: z
           .object({
             bankName: z.string().optional(),
-            loanAmount: z.number().nullable().optional(),
-            amountReceived: z.number().nullable().optional(),
+            loanAmount: z.number().nonnegative().nullable().optional(),
+            amountReceived: z.number().nonnegative().nullable().optional(),
             receivedDate: optionalDate,
+            installment1Amount: z.number().nonnegative().nullable().optional(),
+            installment1Date: optionalDate,
+            installment2Amount: z.number().nonnegative().nullable().optional(),
+            installment2Date: optionalDate,
           })
           .optional(),
         subsidyAmount: z.number().nullable().optional(),

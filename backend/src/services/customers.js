@@ -122,12 +122,24 @@ async function buildCategoriesPayload(customerId, defs) {
       if (cat.extra.loan_amount != null) values.loanAmount = cat.extra.loan_amount
       if (cat.extra.amount_received != null) values.amountReceived = cat.extra.amount_received
       if (cat.extra.received_date != null) values.receivedDate = cat.extra.received_date
+      if (cat.extra.installment1_amount != null) {
+        values.installment1Amount = cat.extra.installment1_amount
+      }
+      if (cat.extra.installment1_date != null) {
+        values.installment1Date = cat.extra.installment1_date
+      }
+      if (cat.extra.installment2_amount != null) {
+        values.installment2Amount = cat.extra.installment2_amount
+      }
+      if (cat.extra.installment2_date != null) {
+        values.installment2Date = cat.extra.installment2_date
+      }
     }
 
     categories[def.key] = values
     categoryUpdatedAt[def.key] = cat.updated_at
     if (cat.notes) categoryNotes[def.key] = cat.notes
-    categoryStatuses[def.key] = getCategoryStatus(def.subStages, values)
+    categoryStatuses[def.key] = getCategoryStatus(def.subStages, values, def.key)
   }
 
   return { categories, categoryUpdatedAt, categoryNotes, categoryStatuses }
@@ -369,6 +381,53 @@ export async function updateOverallStatus(customerId, overallStatus, user) {
   return getCustomerById(customerId)
 }
 
+function normalizeFinanceExtra(extra, beforeValues) {
+  const hasInstallmentInput = [
+    'installment1Amount',
+    'installment1Date',
+    'installment2Amount',
+    'installment2Date',
+  ].some((key) => Object.prototype.hasOwnProperty.call(extra, key))
+
+  // Keep an older deployed frontend safe during a rolling deployment.
+  if (!hasInstallmentInput && Object.prototype.hasOwnProperty.call(extra, 'amountReceived')) {
+    extra = {
+      ...extra,
+      installment1Amount: extra.amountReceived,
+      installment1Date: extra.receivedDate ?? beforeValues.installment1Date ?? null,
+    }
+  }
+
+  const submittedOrExisting = (key, fallback = null) =>
+    Object.prototype.hasOwnProperty.call(extra, key) ? extra[key] : beforeValues[key] ?? fallback
+  const amount1 = Number(submittedOrExisting('installment1Amount', 0) || 0)
+  const amount2 = Number(submittedOrExisting('installment2Amount', 0) || 0)
+  const date1 = submittedOrExisting('installment1Date')
+  const date2 = submittedOrExisting('installment2Date')
+  const loanAmount = Number(submittedOrExisting('loanAmount', 0) || 0)
+
+  if (amount1 > 0 && !date1) {
+    throw new HttpError(400, 'First installment date is required when an amount is entered')
+  }
+  if (amount2 > 0 && !date2) {
+    throw new HttpError(400, 'Second installment date is required when an amount is entered')
+  }
+  if (loanAmount > 0 && amount1 + amount2 > loanAmount) {
+    throw new HttpError(400, 'Loan installments cannot exceed the sanctioned loan amount')
+  }
+
+  return {
+    ...extra,
+    installment1Amount: amount1 || null,
+    installment1Date: date1,
+    installment2Amount: amount2 || null,
+    installment2Date: date2,
+    // Preserve old clients/reports by maintaining their aggregate keys.
+    amountReceived: amount1 + amount2,
+    receivedDate: amount2 > 0 ? date2 : amount1 > 0 ? date1 : null,
+  }
+}
+
 export async function saveCategory(customerId, categoryKey, payload, user) {
   const customerState = await query(
     `select * from customers where id = $1`,
@@ -386,7 +445,7 @@ export async function saveCategory(customerId, categoryKey, payload, user) {
   const subStages = Array.isArray(payload.subStages) ? payload.subStages : []
   const rejectionReason = payload.rejectionReason
   const notes = payload.notes
-  const extra = payload.extra || {}
+  let extra = payload.extra || {}
 
   for (const item of subStages) {
     const sub = def.subStages.find((s) => s.key === item.key || s.dbKey === item.key)
@@ -433,6 +492,9 @@ export async function saveCategory(customerId, categoryKey, payload, user) {
   }
 
   const beforeValues = before.categories[def.key] || {}
+  if (def.key === 'finance' && Object.keys(extra).length) {
+    extra = normalizeFinanceExtra(extra, beforeValues)
+  }
   const stageChanged = subStages.some((item) => {
     const sub = def.subStages.find((candidate) => candidate.key === item.key || candidate.dbKey === item.key)
     return (
@@ -498,10 +560,22 @@ export async function saveCategory(customerId, categoryKey, payload, user) {
     }
 
     const extraMapped = {}
-    if (extra.bankName != null) extraMapped.bank_name = extra.bankName
-    if (extra.loanAmount != null) extraMapped.loan_amount = extra.loanAmount
-    if (extra.amountReceived != null) extraMapped.amount_received = extra.amountReceived
-    if (extra.receivedDate != null) extraMapped.received_date = extra.receivedDate
+    if (extra.bankName !== undefined) extraMapped.bank_name = extra.bankName
+    if (extra.loanAmount !== undefined) extraMapped.loan_amount = extra.loanAmount
+    if (extra.amountReceived !== undefined) extraMapped.amount_received = extra.amountReceived
+    if (extra.receivedDate !== undefined) extraMapped.received_date = extra.receivedDate
+    if (extra.installment1Amount !== undefined) {
+      extraMapped.installment1_amount = extra.installment1Amount
+    }
+    if (extra.installment1Date !== undefined) {
+      extraMapped.installment1_date = extra.installment1Date
+    }
+    if (extra.installment2Amount !== undefined) {
+      extraMapped.installment2_amount = extra.installment2Amount
+    }
+    if (extra.installment2Date !== undefined) {
+      extraMapped.installment2_date = extra.installment2Date
+    }
 
     await client.query(
       `update customer_categories
@@ -653,6 +727,10 @@ export async function updateCategoryNotes(customerId, categoryKey, notes, user) 
 
 export async function updateCategoryExtra(customerId, categoryKey, extraPatch, user) {
   const dbKey = toDbCategory(categoryKey)
+  if (dbKey === 'finance') {
+    const result = await saveCategory(customerId, categoryKey, { extra: extraPatch }, user)
+    return result.customer
+  }
   const mapped = {}
   if (extraPatch.bankName != null) mapped.bank_name = extraPatch.bankName
   if (extraPatch.loanAmount != null) mapped.loan_amount = extraPatch.loanAmount

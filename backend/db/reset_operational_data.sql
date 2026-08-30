@@ -65,7 +65,7 @@ insert into public.stage_definitions (category, sub_stage_key, label, sort_order
   ('pm_suryaghar', 'subsidy_request',        'Subsidy Request',                5, array['Pending','Claimed']),
   ('pm_suryaghar', 'subsidy',                'Subsidy',                        6, array['Pending','Disbursed']),
 
-  ('finance', 'bank_loan', 'Bank Loan', 1, array['Not Applicable','Request Submitted','Completed','Rejected']),
+  ('finance', 'bank_loan', 'Bank Loan', 1, array['Not Applicable','Request Submitted','Approved','Completed','Rejected']),
 
   ('installation', 'fabrication_material', 'Fabrication Material Dispatched', 1, array['No','Yes']),
   ('installation', 'fabrication_work',     'Fabrication Work',                2, array['Pending','Completed']),

@@ -91,6 +91,22 @@ update category_definitions set is_optional = true where category = 'finance';
 update stage_definitions
 set options = array['Pending','Approved','Rejected']
 where category = 'name_change' and sub_stage_key = 'application';
+
+update stage_definitions
+set options = array['Not Applicable','Request Submitted','Approved','Completed','Rejected']
+where category = 'finance' and sub_stage_key = 'bank_loan';
+
+-- Preserve every existing loan receipt by treating the legacy single receipt
+-- as installment 1. Re-runnable: never overwrites installment data.
+update customer_categories
+set extra = extra || jsonb_build_object(
+  'installment1_amount', extra->'amount_received',
+  'installment1_date', extra->'received_date'
+)
+where category = 'finance'
+  and extra ? 'amount_received'
+  and not (extra ? 'installment1_amount');
+
 -- 'On Hold' only exists on older databases; skip when the enum lacks it.
 do $$
 begin

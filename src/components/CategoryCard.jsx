@@ -5,6 +5,10 @@ import { getCategoryStatus, daysBetween } from '../data/mockData'
 
 const DONE = ['Completed', 'Claimed', 'Disbursed', 'Approved', 'Yes']
 
+function isStageDone(categoryKey, value) {
+  return DONE.includes(value) && !(categoryKey === 'finance' && value === 'Approved')
+}
+
 function dateKey(subKey) {
   return `${subKey}Date`
 }
@@ -29,6 +33,7 @@ export default function CategoryCard({
   saving,
   closureReady = true,
   closureBlockers = [],
+  meterInstallationCompleted = false,
 }) {
   const cardRef = useRef(null)
   const isNotApplicable = categoryDef.optional && !data
@@ -51,8 +56,10 @@ export default function CategoryCard({
       extra: {
         bankName: data?.bankName || '',
         loanAmount: data?.loanAmount ?? '',
-        amountReceived: data?.amountReceived ?? '',
-        receivedDate: data?.receivedDate || '',
+        installment1Amount: data?.installment1Amount ?? data?.amountReceived ?? '',
+        installment1Date: data?.installment1Date || data?.receivedDate || '',
+        installment2Amount: data?.installment2Amount ?? '',
+        installment2Date: data?.installment2Date || '',
       },
     }
   }, [categoryDef, data, notes])
@@ -72,6 +79,9 @@ export default function CategoryCard({
   }, [expanded])
 
   const showFinance = categoryDef.key === 'finance' && draft.values.bankLoan && draft.values.bankLoan !== 'Not applicable'
+  const installmentTotal =
+    Number(draft.extra.installment1Amount || 0) + Number(draft.extra.installment2Amount || 0)
+  const loanRemaining = Math.max(0, Number(draft.extra.loanAmount || 0) - installmentTotal)
 
   async function handleStageSave(sub) {
     setSavedMsg('')
@@ -92,8 +102,12 @@ export default function CategoryCard({
       payload.extra = {
         bankName: draft.extra.bankName,
         loanAmount: draft.extra.loanAmount === '' ? null : Number(draft.extra.loanAmount),
-        amountReceived: draft.extra.amountReceived === '' ? null : Number(draft.extra.amountReceived),
-        receivedDate: draft.extra.receivedDate || null,
+        installment1Amount:
+          draft.extra.installment1Amount === '' ? null : Number(draft.extra.installment1Amount),
+        installment1Date: draft.extra.installment1Date || null,
+        installment2Amount:
+          draft.extra.installment2Amount === '' ? null : Number(draft.extra.installment2Amount),
+        installment2Date: draft.extra.installment2Date || null,
       }
     }
     try {
@@ -177,9 +191,9 @@ export default function CategoryCard({
 
           {categoryDef.subStages.map((sub, index) => {
             const value = draft.values[sub.key]
-            const complete = DONE.includes(value)
+            const complete = isStageDone(categoryDef.key, value)
             const firstIncomplete = categoryDef.subStages.findIndex(
-              (stage) => !DONE.includes(draft.values[stage.key])
+              (stage) => !isStageDone(categoryDef.key, draft.values[stage.key])
             )
             const isCurrent = !complete && index === firstIncomplete
 
@@ -301,33 +315,94 @@ export default function CategoryCard({
                       placeholder="Loan amount"
                     />
                   </div>
-                  <div>
-                    <label className="ui-label">Amount received (₹)</label>
-                    <input
-                      type="number"
-                      value={draft.extra.amountReceived}
-                      onChange={(e) =>
-                        setDraft((d) => ({
-                          ...d,
-                          extra: { ...d.extra, amountReceived: e.target.value },
-                        }))
-                      }
-                      placeholder="Amount received"
-                    />
+                  <div className="sm:col-span-2 rounded-xl border border-blue-100 bg-blue-50/50 p-3">
+                    <div className="mb-2 text-xs font-bold text-blue-800">
+                      First installment — after loan approval
+                    </div>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div>
+                        <label className="ui-label">Amount (₹)</label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={draft.extra.installment1Amount}
+                          onChange={(e) =>
+                            setDraft((d) => ({
+                              ...d,
+                              extra: { ...d.extra, installment1Amount: e.target.value },
+                            }))
+                          }
+                          placeholder="First installment amount"
+                        />
+                      </div>
+                      <div>
+                        <label className="ui-label">Received date</label>
+                        <input
+                          type="date"
+                          max={today}
+                          value={draft.extra.installment1Date || ''}
+                          onChange={(e) =>
+                            setDraft((d) => ({
+                              ...d,
+                              extra: { ...d.extra, installment1Date: e.target.value },
+                            }))
+                          }
+                        />
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <label className="ui-label">Received date</label>
-                    <input
-                      type="date"
-                      max={today}
-                      value={draft.extra.receivedDate || ''}
-                      onChange={(e) =>
-                        setDraft((d) => ({
-                          ...d,
-                          extra: { ...d.extra, receivedDate: e.target.value },
-                        }))
-                      }
-                    />
+                  <div className="sm:col-span-2 rounded-xl border border-orange-100 bg-orange-50/50 p-3">
+                    <div className="mb-1 text-xs font-bold text-orange-800">
+                      Second installment — after meter installation
+                    </div>
+                    <p className="mb-2 text-[11px] text-orange-700">
+                      {meterInstallationCompleted
+                        ? 'Meter installation is completed. Record the second installment when received.'
+                        : 'Meter installation is not completed yet.'}
+                    </p>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div>
+                        <label className="ui-label">Amount (₹)</label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={draft.extra.installment2Amount}
+                          onChange={(e) =>
+                            setDraft((d) => ({
+                              ...d,
+                              extra: { ...d.extra, installment2Amount: e.target.value },
+                            }))
+                          }
+                          placeholder="Second installment amount"
+                        />
+                      </div>
+                      <div>
+                        <label className="ui-label">Received date</label>
+                        <input
+                          type="date"
+                          max={today}
+                          value={draft.extra.installment2Date || ''}
+                          onChange={(e) =>
+                            setDraft((d) => ({
+                              ...d,
+                              extra: { ...d.extra, installment2Date: e.target.value },
+                            }))
+                          }
+                        />
+                      </div>
+                    </div>
+                  </div>
+                  <div className="sm:col-span-2 grid grid-cols-2 gap-3 rounded-xl bg-slate-100 px-3 py-2.5 text-xs">
+                    <div>
+                      <span className="text-ink-muted">Total loan received</span>
+                      <div className="font-bold text-ink">₹{installmentTotal.toLocaleString('en-IN')}</div>
+                    </div>
+                    <div>
+                      <span className="text-ink-muted">Loan balance</span>
+                      <div className="font-bold text-ink">₹{loanRemaining.toLocaleString('en-IN')}</div>
+                    </div>
                   </div>
                 </div>
               )}

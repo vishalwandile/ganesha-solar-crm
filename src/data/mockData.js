@@ -67,7 +67,7 @@ export const CATEGORY_DEFS = [
     owner: 'Account',
     optional: true,
     subStages: [
-      { key: 'bankLoan', label: 'Bank loan', options: ['Not applicable', 'Request submitted', 'Completed', 'Rejected'] },
+      { key: 'bankLoan', label: 'Bank loan', options: ['Not applicable', 'Request submitted', 'Approved', 'Completed', 'Rejected'] },
     ],
   },
   {
@@ -326,9 +326,10 @@ export function getCategoryStatus(categoryDef, customerCategoryData) {
   if (values.some((v) => v === 'Rejected')) return 'Rejected'
 
   const isDone = (v) =>
-    ['Completed', 'Yes', 'Disbursed', 'Approved', 'Claimed', 'Not applicable'].includes(v)
+    ['Completed', 'Yes', 'Disbursed', 'Claimed', 'Not applicable'].includes(v) ||
+    (v === 'Approved' && categoryDef.key !== 'finance')
   const isStarted = (v) =>
-    isDone(v) || ['Request submitted', 'In progress'].includes(v)
+    isDone(v) || ['Request submitted', 'In progress', 'Approved'].includes(v)
 
   // Finance with bank loan marked N/A is treated as settled for that track.
   if (values.every((v) => v === 'Not applicable')) return 'Not applicable'

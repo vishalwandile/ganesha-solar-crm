@@ -1,17 +1,19 @@
 /**
  * Port of frontend getCategoryStatus() — returns FE-facing status labels.
  */
-export function getCategoryStatus(subStageDefs, valuesByKey) {
+export function getCategoryStatus(subStageDefs, valuesByKey, categoryKey) {
   if (!valuesByKey) return 'Not applicable'
 
   const values = subStageDefs.map((s) => valuesByKey[s.key] ?? valuesByKey[s.sub_stage_key])
   if (values.some((v) => v === 'Rejected')) return 'Rejected'
 
   const isDone = (v) =>
-    ['Completed', 'Yes', 'Disbursed', 'Approved', 'Claimed', 'Not applicable', 'Not Applicable'].includes(v)
+    ['Completed', 'Yes', 'Disbursed', 'Claimed', 'Not applicable', 'Not Applicable'].includes(v) ||
+    (v === 'Approved' && categoryKey !== 'finance')
 
   const isStarted = (v) =>
-    isDone(v) || ['Request submitted', 'Request Submitted', 'In progress', 'In Progress'].includes(v)
+    isDone(v) ||
+    ['Request submitted', 'Request Submitted', 'In progress', 'In Progress', 'Approved'].includes(v)
 
   if (values.every((v) => v === 'Not applicable' || v === 'Not Applicable')) return 'Not applicable'
   if (values.every(isDone)) return 'Completed'

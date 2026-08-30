@@ -272,20 +272,30 @@ export default function CustomerDetail() {
     })
   }
 
-  const loanReceived = Number(customer.categories?.finance?.amountReceived || 0)
+  const finance = customer.categories?.finance || {}
+  const firstLoanInstallment = Number(
+    finance.installment1Amount ?? finance.amountReceived ?? 0
+  )
+  const secondLoanInstallment = Number(finance.installment2Amount ?? 0)
+  const loanPayments = [
+    firstLoanInstallment > 0 && {
+      id: 'finance-loan-installment-1',
+      amount: firstLoanInstallment,
+      mode: 'Loan · installment 1',
+      date: finance.installment1Date || finance.receivedDate || '—',
+      derivedFromFinance: true,
+    },
+    secondLoanInstallment > 0 && {
+      id: 'finance-loan-installment-2',
+      amount: secondLoanInstallment,
+      mode: 'Loan · installment 2',
+      date: finance.installment2Date || '—',
+      derivedFromFinance: true,
+    },
+  ].filter(Boolean)
   const paymentEntries = [
     ...(customer.payments || []),
-    ...(loanReceived > 0
-      ? [
-          {
-            id: 'finance-loan',
-            amount: loanReceived,
-            mode: 'Loan',
-            date: customer.categories?.finance?.receivedDate || '—',
-            derivedFromFinance: true,
-          },
-        ]
-      : []),
+    ...loanPayments,
   ].sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))
   const totalPaid = paymentEntries.reduce((sum, payment) => sum + payment.amount, 0)
   const progress = customer.totalDue
@@ -452,6 +462,9 @@ export default function CustomerDetail() {
               saving={busy}
               closureReady={customer.closureReady}
               closureBlockers={customer.closureBlockers || []}
+              meterInstallationCompleted={
+                customer.categories?.installation?.meterInstallation === 'Completed'
+              }
             />
           ))}
         </div>

@@ -139,7 +139,7 @@ insert into stage_definitions (category, sub_stage_key, label, sort_order, optio
   ('pm_suryaghar', 'subsidy_request',        'Subsidy Request',                5, array['Pending','Claimed']),
   ('pm_suryaghar', 'subsidy',                'Subsidy',                        6, array['Pending','Disbursed']),
 
-  ('finance', 'bank_loan', 'Bank Loan', 1, array['Not Applicable','Request Submitted','Completed','Rejected']),
+  ('finance', 'bank_loan', 'Bank Loan', 1, array['Not Applicable','Request Submitted','Approved','Completed','Rejected']),
 
   ('installation', 'fabrication_material', 'Fabrication Material Dispatched', 1, array['No','Yes']),
   ('installation', 'fabrication_work',     'Fabrication Work',                2, array['Pending','Completed']),
@@ -199,7 +199,9 @@ create table customer_categories (
   notes text,            -- free-text "why is this stuck" field
   extra jsonb not null default '{}'::jsonb, -- category-specific extras, e.g.
                                              -- finance: {"bank_name": "...", "loan_amount": 200000,
-                                             --           "amount_received": 0, "received_date": null}
+                                             -- "installment1_amount": 100000, "installment1_date": "2026-08-01",
+                                             -- "installment2_amount": 100000, "installment2_date": "2026-08-20",
+                                             -- "amount_received": 200000, "received_date": "2026-08-20"}
   updated_at timestamptz not null default now(),
   updated_by uuid references users(id),
   unique (customer_id, category)
