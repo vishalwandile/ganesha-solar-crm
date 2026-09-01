@@ -23,7 +23,7 @@ export const crmApi = {
     return apiRequest('/api/dashboard/summary')
   },
 
-  listCustomers(search = '', page = 1, pageSize = 20) {
+  listCustomers(search = '', page = 1, pageSize = 10) {
     const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) })
     if (search) params.set('search', search)
     return apiRequest(`/api/customers?${params}`)
