@@ -153,7 +153,7 @@ router.get(
     const result = await listCustomers(
       req.query.search || '',
       req.query.page || 1,
-      req.query.pageSize || 20
+      req.query.pageSize || 10
     )
     res.json(result)
   })

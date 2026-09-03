@@ -202,9 +202,9 @@ export async function getCustomerById(id) {
   }
 }
 
-export async function listCustomers(search, page = 1, pageSize = 20) {
+export async function listCustomers(search, page = 1, pageSize = 10) {
   const safePage = Math.max(1, Number(page) || 1)
-  const safePageSize = Math.min(100, Math.max(5, Number(pageSize) || 20))
+  const safePageSize = Math.min(100, Math.max(5, Number(pageSize) || 10))
   const offset = (safePage - 1) * safePageSize
   const params = []
   let where = ''

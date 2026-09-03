@@ -33,7 +33,7 @@ export function CrmProvider({ children }) {
   const [customers, setCustomers] = useState([])
   const [customerPagination, setCustomerPagination] = useState({
     page: 1,
-    pageSize: 20,
+    pageSize: 10,
     total: 0,
     totalPages: 1,
   })
@@ -72,7 +72,7 @@ export function CrmProvider({ children }) {
     return customer
   }, [])
 
-  const refreshCustomers = useCallback(async (search = '', page = 1, pageSize = 20) => {
+  const refreshCustomers = useCallback(async (search = '', page = 1, pageSize = 10) => {
     const data = await crmApi.listCustomers(search, page, pageSize)
     setCustomers(data.customers || [])
     setCustomerPagination(
@@ -146,7 +146,7 @@ export function CrmProvider({ children }) {
     } finally {
       setSessionUser(null)
       setCustomers([])
-      setCustomerPagination({ page: 1, pageSize: 20, total: 0, totalPages: 1 })
+      setCustomerPagination({ page: 1, pageSize: 10, total: 0, totalPages: 1 })
       setCustomerCache({})
       setUsers([])
       setDashboard({ total: 0, inactive: 0, counts: {} })
