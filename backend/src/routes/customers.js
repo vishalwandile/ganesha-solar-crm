@@ -3,7 +3,7 @@ import multer from 'multer'
 import { z } from 'zod'
 import { asyncHandler, HttpError } from '../middleware/error.js'
 import { requireCategoryEdit, requireCategoryFeature, requireFeature } from '../middleware/permissions.js'
-import { redactCustomer } from '../lib/features.js'
+import { hasFeature, redactCustomer } from '../lib/features.js'
 import { config } from '../config.js'
 import {
   addDocument,
@@ -150,10 +150,31 @@ router.get(
   '/',
   requireFeature('customers'),
   asyncHandler(async (req, res) => {
+    const filters = z
+      .object({
+        queue: z.enum(['installation', 'pmSuryaghar', 'payments']).optional(),
+        subStage: z.string().min(1).max(80).optional(),
+        status: z.enum(['all', 'New', 'In progress', 'Completed', 'Inactive']).optional(),
+      })
+      .parse({
+        queue: req.query.queue || undefined,
+        subStage: req.query.subStage || undefined,
+        status: req.query.status || undefined,
+      })
+    if (filters.subStage && !filters.queue) {
+      throw new HttpError(400, 'A pipeline queue is required with a sub-stage filter')
+    }
+    if (filters.queue && !hasFeature(req.user, 'pipelineFilters')) {
+      throw new HttpError(403, 'You do not have access to pipeline filters')
+    }
+    if (filters.queue === 'payments' && !hasFeature(req.user, 'payments')) {
+      throw new HttpError(403, 'You do not have access to payment information')
+    }
     const result = await listCustomers(
       req.query.search || '',
       req.query.page || 1,
-      req.query.pageSize || 10
+      req.query.pageSize || 10,
+      filters
     )
     res.json(result)
   })
@@ -277,7 +298,7 @@ router.patch(
       req.params.category,
       {
         subStages: [
-          { key: req.params.subStageKey, value: body.value, date: body.date ?? null },
+          { key: req.params.subStageKey, value: body.value, date: body.date },
         ],
         rejectionReason: body.rejectionReason,
       },

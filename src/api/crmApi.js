@@ -23,9 +23,16 @@ export const crmApi = {
     return apiRequest('/api/dashboard/summary')
   },
 
-  listCustomers(search = '', page = 1, pageSize = 10) {
+  categoryDefinitions() {
+    return apiRequest('/api/customers/meta/categories')
+  },
+
+  listCustomers(search = '', page = 1, pageSize = 10, filters = {}) {
     const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) })
     if (search) params.set('search', search)
+    if (filters.queue) params.set('queue', filters.queue)
+    if (filters.subStage) params.set('subStage', filters.subStage)
+    if (filters.status) params.set('status', filters.status)
     return apiRequest(`/api/customers?${params}`)
   },
 

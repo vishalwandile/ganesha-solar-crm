@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import Layout from '../components/Layout'
 import StatusBadge from '../components/StatusBadge'
 import { IconClose, IconPlus, IconSearch, IconView } from '../components/Icons'
 import { useCrm } from '../context/CrmContext'
 import { hasFeature } from '../data/features'
+import { crmApi } from '../api/crmApi'
 
 function formatDate(value) {
   if (!value) return '—'
@@ -19,18 +20,51 @@ function formatDate(value) {
     .replaceAll('/', '-')
 }
 
+const STATUS_FILTERS = [
+  { value: '', label: 'All customers' },
+  { value: 'all', label: 'Total customers' },
+  { value: 'New', label: 'New' },
+  { value: 'In progress', label: 'In progress' },
+  { value: 'Completed', label: 'Completed' },
+  { value: 'Inactive', label: 'Inactive' },
+]
+
 export default function CustomerList() {
   const { customers, customerPagination, refreshCustomers, sessionUser } = useCrm()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [query, setQuery] = useState('')
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
+  const [categoryDefs, setCategoryDefs] = useState([])
+  const canFilterPipeline = hasFeature(sessionUser, 'pipelineFilters')
+  const requestedQueue = canFilterPipeline ? searchParams.get('queue') || '' : ''
+  const permittedQueues = hasFeature(sessionUser, 'payments')
+    ? ['installation', 'pmSuryaghar', 'payments']
+    : ['installation', 'pmSuryaghar']
+  const queue = permittedQueues.includes(requestedQueue)
+    ? requestedQueue
+    : ''
+  const subStage = queue && queue !== 'payments' ? searchParams.get('subStage') || '' : ''
+  const requestedStatus = searchParams.get('status') || ''
+  const status = STATUS_FILTERS.some((item) => item.value === requestedStatus)
+    ? requestedStatus
+    : ''
+  const selectedCategory = categoryDefs.find((category) => category.key === queue)
+
+  useEffect(() => {
+    if (!canFilterPipeline) return
+    crmApi
+      .categoryDefinitions()
+      .then((data) => setCategoryDefs(data.categories || []))
+      .catch(() => setCategoryDefs([]))
+  }, [canFilterPipeline])
 
   useEffect(() => {
     let alive = true
     setLoading(true)
     const t = setTimeout(async () => {
       try {
-        await refreshCustomers(query.trim(), page)
+        await refreshCustomers(query.trim(), page, 10, { queue, subStage, status })
       } finally {
         if (alive) setLoading(false)
       }
@@ -39,7 +73,20 @@ export default function CustomerList() {
       alive = false
       clearTimeout(t)
     }
-  }, [query, page, refreshCustomers])
+  }, [query, page, queue, subStage, status, refreshCustomers])
+
+  function setListFilters({ nextQueue = queue, nextSubStage = subStage, nextStatus = status } = {}) {
+    const next = new URLSearchParams()
+    if (nextQueue) next.set('queue', nextQueue)
+    if (nextQueue && nextQueue !== 'payments' && nextSubStage) next.set('subStage', nextSubStage)
+    if (nextStatus) next.set('status', nextStatus)
+    setSearchParams(next)
+    setPage(1)
+  }
+
+  function setPipelineFilter(nextQueue, nextSubStage = '') {
+    setListFilters({ nextQueue, nextSubStage, nextStatus: status })
+  }
 
   return (
     <Layout title="Customers" subtitle="Search and manage solar consumers">
@@ -89,9 +136,65 @@ export default function CustomerList() {
         )}
       </div>
 
+      <div className="ui-surface grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_1fr_auto] sm:items-end">
+          <div>
+            <label className="ui-label">Status</label>
+            <select
+              value={status}
+              onChange={(event) =>
+                setListFilters({ nextQueue: queue, nextSubStage: subStage, nextStatus: event.target.value })
+              }
+            >
+              {STATUS_FILTERS.map((item) => (
+                <option key={item.value || 'all-customers'} value={item.value}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          {canFilterPipeline && (
+          <>
+          <div>
+            <label className="ui-label">Pending queue</label>
+            <select value={queue} onChange={(event) => setPipelineFilter(event.target.value)}>
+              <option value="">All customers</option>
+              <option value="installation">Installation pending</option>
+              <option value="pmSuryaghar">PM Suryaghar pending</option>
+              {hasFeature(sessionUser, 'payments') && (
+                <option value="payments">Payments pending</option>
+              )}
+            </select>
+          </div>
+          <div>
+            <label className="ui-label">Current pending step</label>
+            <select
+              value={subStage}
+              disabled={!selectedCategory}
+              onChange={(event) => setPipelineFilter(queue, event.target.value)}
+            >
+              <option value="">All pending steps</option>
+              {(selectedCategory?.subStages || []).map((stage) => (
+                <option key={stage.key} value={stage.key}>
+                  {stage.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          </>
+          )}
+          <button
+            type="button"
+            className="ui-btn-secondary"
+            disabled={!queue && !status}
+            onClick={() => setListFilters({ nextQueue: '', nextSubStage: '', nextStatus: '' })}
+          >
+            Clear filters
+          </button>
+        </div>
+
       <div className="ui-surface overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[860px] text-sm">
+          <table className={`w-full text-sm ${queue ? 'min-w-[1180px]' : 'min-w-[860px]'}`}>
             <thead>
               <tr className="border-b border-slate-100 bg-slate-50/80 text-left">
                 <th className="px-5 py-3.5 text-xs font-bold uppercase tracking-wide text-ink-muted">Name</th>
@@ -105,6 +208,29 @@ export default function CustomerList() {
                 <th className="px-5 py-3.5 text-xs font-bold uppercase tracking-wide text-ink-muted">
                   Capacity
                 </th>
+                {queue && queue !== 'payments' && (
+                  <>
+                    <th className="px-5 py-3.5 text-xs font-bold uppercase tracking-wide text-ink-muted">
+                      Current step
+                    </th>
+                    <th className="px-5 py-3.5 text-xs font-bold uppercase tracking-wide text-ink-muted">
+                      Last completed
+                    </th>
+                  </>
+                )}
+                {queue === 'payments' && (
+                  <>
+                    <th className="px-5 py-3.5 text-xs font-bold uppercase tracking-wide text-ink-muted">
+                      Due
+                    </th>
+                    <th className="px-5 py-3.5 text-xs font-bold uppercase tracking-wide text-ink-muted">
+                      Received
+                    </th>
+                    <th className="px-5 py-3.5 text-xs font-bold uppercase tracking-wide text-ink-muted">
+                      Pending
+                    </th>
+                  </>
+                )}
                 <th className="px-5 py-3.5 text-xs font-bold uppercase tracking-wide text-ink-muted">Status</th>
                 <th className="px-5 py-3.5 text-right text-xs font-bold uppercase tracking-wide text-ink-muted">
                   View
@@ -127,6 +253,39 @@ export default function CustomerList() {
                       {c.solarCapacity || '—'}
                     </span>
                   </td>
+                  {queue && queue !== 'payments' && (
+                    <>
+                      <td className="px-5 py-3.5">
+                        <div className="font-semibold text-orange-700">
+                          {c.pipeline?.openSubStage?.label || '—'}
+                        </div>
+                        {c.pipeline?.outOfSequence && (
+                          <div
+                            className="mt-0.5 text-[10px] font-semibold text-red-600"
+                            title="A later step is already completed; existing data was preserved."
+                          >
+                            Out of sequence
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-5 py-3.5 text-ink-muted">
+                        {c.pipeline?.lastCompletedSubStage?.label || 'Not started'}
+                      </td>
+                    </>
+                  )}
+                  {queue === 'payments' && (
+                    <>
+                      <td className="px-5 py-3.5 font-semibold text-ink">
+                        ₹{Number(c.pipeline?.totalDue || 0).toLocaleString('en-IN')}
+                      </td>
+                      <td className="px-5 py-3.5 font-semibold text-green-700">
+                        ₹{Number(c.pipeline?.totalReceived || 0).toLocaleString('en-IN')}
+                      </td>
+                      <td className="px-5 py-3.5 font-extrabold text-orange-700">
+                        ₹{Number(c.pipeline?.pendingAmount || 0).toLocaleString('en-IN')}
+                      </td>
+                    </>
+                  )}
                   <td className="px-5 py-3.5">
                     <div className="flex flex-wrap gap-1.5">
                       <StatusBadge status={c.overallStatus} />
@@ -147,7 +306,10 @@ export default function CustomerList() {
               ))}
               {!loading && customers.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-5 py-10 text-center text-sm text-ink-soft">
+                  <td
+                    colSpan={queue === 'payments' ? 10 : queue ? 9 : 7}
+                    className="px-5 py-10 text-center text-sm text-ink-soft"
+                  >
                     No customers match your search.
                   </td>
                 </tr>

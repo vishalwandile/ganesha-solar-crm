@@ -1,3 +1,5 @@
+import { isStageDone } from './pipeline.js'
+
 /**
  * Port of frontend getCategoryStatus() — returns FE-facing status labels.
  */
@@ -7,9 +9,7 @@ export function getCategoryStatus(subStageDefs, valuesByKey, categoryKey) {
   const values = subStageDefs.map((s) => valuesByKey[s.key] ?? valuesByKey[s.sub_stage_key])
   if (values.some((v) => v === 'Rejected')) return 'Rejected'
 
-  const isDone = (v) =>
-    ['Completed', 'Yes', 'Disbursed', 'Claimed', 'Not applicable', 'Not Applicable'].includes(v) ||
-    (v === 'Approved' && categoryKey !== 'finance')
+  const isDone = (v) => isStageDone(categoryKey, v)
 
   const isStarted = (v) =>
     isDone(v) ||

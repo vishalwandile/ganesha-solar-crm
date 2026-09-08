@@ -205,6 +205,22 @@ async function main() {
         end loop;
       end $$
     `)
+    // Overall status now advances from any category, not just name change /
+    // rooftop solar. Promote customers whose work already started elsewhere.
+    await client.query(`
+      update customers c
+      set overall_status = 'In Progress',
+          updated_at = now()
+      where c.overall_status = 'New'
+        and exists (
+          select 1
+          from customer_sub_stages css
+          where css.customer_id = c.id
+            and css.value in ('In Progress', 'Completed', 'Rejected',
+                              'Request Submitted', 'Approved', 'Yes',
+                              'Claimed', 'Disbursed')
+        )
+    `)
     console.log('Migration applied.')
   } catch (err) {
     console.error('Migration failed:', err.message)

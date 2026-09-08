@@ -6,6 +6,7 @@ export const FEATURE_KEYS = [
   'pmSuryaghar',
   'documents',
   'payments',
+  'pipelineFilters',
   'users',
   'inactiveCustomer',
 ]
@@ -18,6 +19,7 @@ export const FEATURE_LABELS = {
   pmSuryaghar: 'PM Suryaghar',
   documents: 'Documents',
   payments: 'Payments',
+  pipelineFilters: 'Pipeline dashboard & filters',
   users: 'Users & teams',
   inactiveCustomer: 'Mark customer inactive',
 }

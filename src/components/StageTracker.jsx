@@ -16,7 +16,12 @@ const LINE_COLOR = {
   'Not applicable': 'bg-slate-200',
 }
 
-export default function StageTracker({ customer, onSelect, activeKey }) {
+export default function StageTracker({
+  customer,
+  onSelect,
+  activeKey,
+  categoryDefs = CATEGORY_DEFS,
+}) {
   return (
     <div className="ui-surface overflow-x-auto p-4 sm:p-5">
       <div className="mb-3 flex items-center justify-between">
@@ -24,12 +29,12 @@ export default function StageTracker({ customer, onSelect, activeKey }) {
         <div className="hidden text-[11px] font-medium text-ink-muted sm:block">Click a stage to jump</div>
       </div>
       <div className="flex min-w-[680px] items-center">
-        {CATEGORY_DEFS.map((cat, i) => {
+        {categoryDefs.map((cat, i) => {
           const isNotApplicable = cat.optional && !customer.categories[cat.key]
           const status = isNotApplicable
             ? 'Not applicable'
             : getCategoryStatus(cat, customer.categories[cat.key])
-          const isLast = i === CATEGORY_DEFS.length - 1
+          const isLast = i === categoryDefs.length - 1
           const isActive = activeKey === cat.key
 
           return (

@@ -8,8 +8,8 @@ const router = Router()
 router.get(
   '/summary',
   requireFeature('dashboard'),
-  asyncHandler(async (_req, res) => {
-    const summary = await getDashboardSummary()
+  asyncHandler(async (req, res) => {
+    const summary = await getDashboardSummary(req.user)
     res.json(summary)
   })
 )

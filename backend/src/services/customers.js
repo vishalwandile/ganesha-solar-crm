@@ -13,6 +13,13 @@ import {
   resolveDocumentType,
 } from '../lib/keys.js'
 import { calculateExpectedSubsidy, getCategoryStatus, parseCapacityKW } from '../lib/status.js'
+import {
+  loanReceivedFromExtra,
+  resolveCategoryPipeline,
+  STAGE_QUEUE_KEYS,
+  stageChangeLock,
+} from '../lib/pipeline.js'
+import { hasFeature } from '../lib/features.js'
 import { HttpError } from '../middleware/error.js'
 
 function toDateStr(value) {
@@ -51,6 +58,7 @@ export async function loadCategoryDefs() {
         key: toFeSubStage(s.sub_stage_key),
         dbKey: s.sub_stage_key,
         label: s.stage_label,
+        sortOrder: s.stage_order,
         options: (s.options || []).map(toFeStatus),
         dbOptions: s.options || [],
       })),
@@ -202,19 +210,227 @@ export async function getCustomerById(id) {
   }
 }
 
-export async function listCustomers(search, page = 1, pageSize = 10) {
+async function loadPipelineSnapshot() {
+  const defs = (await loadCategoryDefs())
+    .filter((def) => STAGE_QUEUE_KEYS.includes(def.key))
+    .sort((a, b) => STAGE_QUEUE_KEYS.indexOf(a.key) - STAGE_QUEUE_KEYS.indexOf(b.key))
+  const dbCategories = defs.map((def) => def.dbKey)
+  const [customerResult, stageResult, paymentResult, financeResult] = await Promise.all([
+    query(`select * from customers where is_active = true order by created_at desc, id desc`),
+    query(
+      `select css.customer_id, css.category, css.sub_stage_key, css.value, css.stage_date
+       from customer_sub_stages css
+       join customers c on c.id = css.customer_id
+       where c.is_active = true and css.category = any($1::category_key[])`,
+      [dbCategories]
+    ),
+    query(
+      `select p.customer_id, coalesce(sum(p.amount), 0)::numeric as total
+       from payments p
+       join customers c on c.id = p.customer_id
+       where c.is_active = true
+       group by p.customer_id`
+    ),
+    query(
+      `select cc.customer_id, cc.extra
+       from customer_categories cc
+       join customers c on c.id = cc.customer_id
+       where c.is_active = true and cc.category = 'finance'`
+    ),
+  ])
+
+  const stagesByCustomer = new Map()
+  for (const row of stageResult.rows) {
+    if (!stagesByCustomer.has(row.customer_id)) stagesByCustomer.set(row.customer_id, [])
+    stagesByCustomer.get(row.customer_id).push(row)
+  }
+  const paymentsByCustomer = new Map(
+    paymentResult.rows.map((row) => [row.customer_id, Number(row.total || 0)])
+  )
+  const financeByCustomer = new Map(
+    financeResult.rows.map((row) => [row.customer_id, row.extra || {}])
+  )
+
+  const customers = customerResult.rows.map((row) => {
+    const stageRows = stagesByCustomer.get(row.id) || []
+    const pipeline = {}
+    for (const def of defs) {
+      const values = {}
+      for (const stage of def.subStages) {
+        const saved = stageRows.find(
+          (item) => item.category === def.dbKey && item.sub_stage_key === stage.dbKey
+        )
+        values[stage.key] = toFeStatus(saved?.value ?? stage.options[0])
+        values[`${stage.key}Date`] = toDateStr(saved?.stage_date)
+      }
+      pipeline[def.key] = resolveCategoryPipeline(def, values)
+    }
+
+    const totalDue = Number(row.total_due || 0)
+    const normalPayments = paymentsByCustomer.get(row.id) || 0
+    const loanReceived = loanReceivedFromExtra(financeByCustomer.get(row.id))
+    const totalReceived = normalPayments + loanReceived
+    pipeline.payments = {
+      totalDue,
+      totalReceived,
+      pendingAmount: Math.max(0, totalDue - totalReceived),
+    }
+
+    return { row, pipeline }
+  })
+
+  return { defs, customers }
+}
+
+function publicStage(stage) {
+  if (!stage) return null
+  return {
+    key: stage.key,
+    label: stage.label,
+    value: stage.value,
+    date: stage.date,
+  }
+}
+
+export async function getPipelineQueueSummary({ includePayments = true } = {}) {
+  const snapshot = await loadPipelineSnapshot()
+  const queues = snapshot.defs.map((def) => {
+    const buckets = def.subStages.map((stage) => ({
+      key: stage.key,
+      label: stage.label,
+      sortOrder: stage.sortOrder,
+      count: 0,
+    }))
+    for (const customer of snapshot.customers) {
+      const open = customer.pipeline[def.key].openStage
+      if (!open) continue
+      const bucket = buckets.find((item) => item.key === open.key)
+      if (bucket) bucket.count += 1
+    }
+    return {
+      key: def.key,
+      label: def.label,
+      type: 'stage',
+      pendingCount: buckets.reduce((sum, bucket) => sum + bucket.count, 0),
+      subStages: buckets,
+    }
+  })
+
+  if (includePayments) {
+    const pending = snapshot.customers.filter(
+      (customer) => customer.pipeline.payments.pendingAmount > 0
+    )
+    queues.push({
+      key: 'payments',
+      label: 'Pending payments',
+      type: 'payments',
+      pendingCount: pending.length,
+      pendingAmount: pending.reduce(
+        (sum, customer) => sum + customer.pipeline.payments.pendingAmount,
+        0
+      ),
+    })
+  }
+  return queues
+}
+
+async function listPipelineCustomers(search, page, pageSize, filters) {
+  const safePage = Math.max(1, Number(page) || 1)
+  const safePageSize = Math.min(100, Math.max(5, Number(pageSize) || 10))
+  const snapshot = await loadPipelineSnapshot()
+  const queue = filters.queue
+  const requestedStage = filters.subStage || ''
+  const definition = snapshot.defs.find((def) => def.key === queue)
+  if (queue !== 'payments' && !definition) {
+    throw new HttpError(400, 'Unknown pipeline queue')
+  }
+  if (
+    requestedStage &&
+    !definition?.subStages.some(
+      (stage) => stage.key === requestedStage || stage.dbKey === requestedStage
+    )
+  ) {
+    throw new HttpError(400, 'Unknown sub-stage for this pipeline queue')
+  }
+
+  const normalizedSearch = String(search || '').trim().toLowerCase()
+  const compactSearch = normalizedSearch.replace(/\s/g, '')
+  let matches = snapshot.customers.filter((customer) => {
+    if (normalizedSearch) {
+      const row = customer.row
+      const haystack = `${row.name} ${row.consumer_number} ${row.mobile}`.toLowerCase()
+      const mobile = String(row.mobile || '').replace(/\s/g, '')
+      if (!haystack.includes(normalizedSearch) && !mobile.includes(compactSearch)) return false
+    }
+    if (queue === 'payments') {
+      if (customer.pipeline.payments.pendingAmount <= 0) return false
+    } else {
+      const open = customer.pipeline[queue].openStage
+      if (!open) return false
+      if (requestedStage && open.key !== requestedStage && open.dbKey !== requestedStage) {
+        return false
+      }
+    }
+    if (filters.status === 'Inactive') return false
+    if (filters.status && filters.status !== 'all') {
+      return toFeStatus(customer.row.overall_status) === filters.status
+    }
+    return true
+  })
+
+  const total = matches.length
+  const offset = (safePage - 1) * safePageSize
+  matches = matches.slice(offset, offset + safePageSize)
+  return {
+    customers: matches.map(({ row, pipeline }) => {
+      const queueData =
+        queue === 'payments'
+          ? { queue, ...pipeline.payments }
+          : {
+              queue,
+              openSubStage: publicStage(pipeline[queue].openStage),
+              lastCompletedSubStage: publicStage(
+                pipeline[queue].lastCompletedStage
+              ),
+              outOfSequence: pipeline[queue].outOfSequence,
+            }
+      return { ...mapCustomerRow(row), pipeline: queueData }
+    }),
+    pagination: {
+      page: safePage,
+      pageSize: safePageSize,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / safePageSize)),
+    },
+  }
+}
+
+export async function listCustomers(search, page = 1, pageSize = 10, filters = {}) {
+  if (filters.queue) {
+    return listPipelineCustomers(search, page, pageSize, filters)
+  }
   const safePage = Math.max(1, Number(page) || 1)
   const safePageSize = Math.min(100, Math.max(5, Number(pageSize) || 10))
   const offset = (safePage - 1) * safePageSize
   const params = []
-  let where = ''
+  const clauses = []
   if (search?.trim()) {
     params.push(`%${search.trim().toLowerCase()}%`)
     params.push(search.trim().replace(/\s/g, ''))
-    where = `where lower(name) like $1
+    clauses.push(`(lower(name) like $1
       or lower(consumer_number) like $1
-      or replace(mobile, ' ', '') like $2`
+      or replace(mobile, ' ', '') like $2)`)
   }
+  if (filters.status === 'Inactive') {
+    clauses.push('is_active = false')
+  } else if (filters.status === 'all') {
+    clauses.push('is_active = true')
+  } else if (filters.status) {
+    clauses.push('is_active = true')
+    params.push(toDbStatus(filters.status))
+    clauses.push(`overall_status = $${params.length}`)
+  }
+  const where = clauses.length ? `where ${clauses.join(' and ')}` : ''
   const limitParam = params.length + 1
   const offsetParam = params.length + 2
   params.push(safePageSize, offset)
@@ -492,14 +708,53 @@ export async function saveCategory(customerId, categoryKey, payload, user) {
   }
 
   const beforeValues = before.categories[def.key] || {}
+  const resolvedSubStages = subStages.map((item) => {
+    const sub = def.subStages.find(
+      (candidate) => candidate.key === item.key || candidate.dbKey === item.key
+    )
+    return {
+      ...item,
+      sub,
+      normalizedDate:
+        item.date === undefined
+          ? beforeValues[`${sub.key}Date`] || null
+          : toDateStr(item.date),
+    }
+  })
+  for (const item of resolvedSubStages) {
+    const lock = stageChangeLock(
+      def,
+      beforeValues,
+      item.sub.key,
+      toFeStatus(item.value),
+      item.normalizedDate
+    )
+    if (!lock.allowed) {
+      throw new HttpError(
+        409,
+        lock.message ||
+          (lock.openStage
+            ? `Complete the current step first: ${lock.openStage.label}`
+            : `${def.label} is already complete`),
+        {
+          code: 'SEQUENTIAL_LOCK',
+          openSubStage: lock.openStage
+            ? { key: lock.openStage.key, label: lock.openStage.label }
+            : null,
+          attemptedSubStage: lock.attemptedStage
+            ? { key: lock.attemptedStage.key, label: lock.attemptedStage.label }
+            : null,
+        }
+      )
+    }
+  }
   if (def.key === 'finance' && Object.keys(extra).length) {
     extra = normalizeFinanceExtra(extra, beforeValues)
   }
-  const stageChanged = subStages.some((item) => {
-    const sub = def.subStages.find((candidate) => candidate.key === item.key || candidate.dbKey === item.key)
+  const stageChanged = resolvedSubStages.some((item) => {
     return (
-      toFeStatus(item.value) !== beforeValues[sub.key] ||
-      (toDateStr(item.date) || null) !== (beforeValues[`${sub.key}Date`] || null)
+      toFeStatus(item.value) !== beforeValues[item.sub.key] ||
+      item.normalizedDate !== (beforeValues[`${item.sub.key}Date`] || null)
     )
   })
   const notesChanged =
@@ -522,10 +777,14 @@ export async function saveCategory(customerId, categoryKey, payload, user) {
       (payload.subsidyReceivedDate !== undefined &&
         (payload.subsidyReceivedDate || null) !==
           toDateStr(customerState.rows[0].subsidy_received_date)))
+  const nextValues = { ...beforeValues }
+  for (const item of resolvedSubStages) {
+    nextValues[item.sub.key] = toFeStatus(item.value)
+  }
+  const nextCategoryStatus = getCategoryStatus(def.subStages, nextValues, def.key)
   const startsPipeline =
     customerState.rows[0].overall_status === 'New' &&
-    ['nameChange', 'rooftopSolar'].includes(def.key) &&
-    subStages.length > 0
+    ['In progress', 'Completed', 'Rejected'].includes(nextCategoryStatus)
 
   if (
     !stageChanged &&
@@ -542,10 +801,9 @@ export async function saveCategory(customerId, categoryKey, payload, user) {
   }
 
   await withTransaction(async (client) => {
-    for (const item of subStages) {
-      const sub = def.subStages.find((s) => s.key === item.key || s.dbKey === item.key)
+    for (const item of resolvedSubStages) {
       const dbValue = toDbStatus(toFeStatus(item.value))
-      const stageDate = item.date ? item.date : null
+      const stageDate = item.normalizedDate
       await client.query(
         `insert into customer_sub_stages (customer_id, category, sub_stage_key, value, stage_date, updated_by)
          values ($1, $2, $3, $4, $5, $6)
@@ -555,7 +813,7 @@ export async function saveCategory(customerId, categoryKey, payload, user) {
            stage_date = excluded.stage_date,
            updated_by = excluded.updated_by,
            updated_at = now()`,
-        [customerId, def.dbKey, sub.dbKey, dbValue, stageDate, user.id]
+        [customerId, def.dbKey, item.sub.dbKey, dbValue, stageDate, user.id]
       )
     }
 
@@ -621,7 +879,7 @@ export async function saveCategory(customerId, categoryKey, payload, user) {
        where id = $1 and overall_status = 'Completed'`,
       [customerId]
     )
-  } else if (['nameChange', 'rooftopSolar'].includes(def.key) && subStages.length > 0) {
+  } else if (startsPipeline) {
     await query(
       `update customers set overall_status = 'In Progress'
        where id = $1 and overall_status = 'New'`,
@@ -653,63 +911,6 @@ export async function setCustomerActive(customerId, isActive, user) {
     `update customers set is_active = $1, updated_at = now() where id = $2`,
     [isActive, customerId]
   )
-  return getCustomerById(customerId)
-}
-
-export async function updateSubStage(customerId, categoryKey, subStageKey, value, rejectionReason, user) {
-  const defs = await loadCategoryDefs()
-  const def = defs.find((d) => d.key === categoryKey || d.dbKey === categoryKey)
-  if (!def) throw new HttpError(404, 'Unknown category')
-
-  const sub = def.subStages.find((s) => s.key === subStageKey || s.dbKey === subStageKey)
-  if (!sub) throw new HttpError(404, 'Unknown sub-stage')
-
-  const feValue = toFeStatus(value)
-  if (!sub.options.includes(feValue) && !sub.dbOptions.includes(value)) {
-    throw new HttpError(400, `Invalid status "${value}" for ${sub.label}`, {
-      allowed: sub.options,
-    })
-  }
-
-  const dbValue = toDbStatus(feValue)
-  if (dbValue === 'Rejected' && !(rejectionReason || '').trim()) {
-    throw new HttpError(400, 'Rejection reason is required when status is Rejected')
-  }
-
-  // Ensure category row exists (e.g. enabling optional category)
-  await query(
-    `insert into customer_categories (customer_id, category, updated_by)
-     values ($1, $2, $3)
-     on conflict (customer_id, category) do nothing`,
-    [customerId, def.dbKey, user.id]
-  )
-
-  await withTransaction(async (client) => {
-    await client.query(
-      `insert into customer_sub_stages (customer_id, category, sub_stage_key, value, updated_by)
-       values ($1, $2, $3, $4, $5)
-       on conflict (customer_id, category, sub_stage_key)
-       do update set value = excluded.value, updated_by = excluded.updated_by, updated_at = now()`,
-      [customerId, def.dbKey, sub.dbKey, dbValue, user.id]
-    )
-
-    if (dbValue === 'Rejected') {
-      await client.query(
-        `update customer_categories
-         set rejection_reason = $1, updated_by = $2, updated_at = now()
-         where customer_id = $3 and category = $4`,
-        [rejectionReason.trim(), user.id, customerId, def.dbKey]
-      )
-    }
-
-    await client.query(
-      `update customer_categories set updated_by = $1, updated_at = now()
-       where customer_id = $2 and category = $3`,
-      [user.id, customerId, def.dbKey]
-    )
-
-  })
-
   return getCustomerById(customerId)
 }
 
@@ -889,7 +1090,7 @@ export async function updateSubsidyMeta(customerId, { subsidyAmount, subsidyRece
   return getCustomerById(customerId)
 }
 
-export async function getDashboardSummary() {
+export async function getDashboardSummary(user) {
   const { rows } = await query(
     `select
        count(*) filter (where is_active = true)::int as total,
@@ -900,7 +1101,7 @@ export async function getDashboardSummary() {
      from customers`
   )
   const summary = rows[0]
-  return {
+  const result = {
     total: summary.total,
     inactive: summary.inactive,
     counts: {
@@ -909,6 +1110,12 @@ export async function getDashboardSummary() {
       Completed: summary.completed_count,
     },
   }
+  if (hasFeature(user, 'pipelineFilters')) {
+    result.pipeline = await getPipelineQueueSummary({
+      includePayments: hasFeature(user, 'payments'),
+    })
+  }
+  return result
 }
 
 export async function getRecentActivity(limit = 10) {

@@ -39,7 +39,12 @@ export function CrmProvider({ children }) {
   })
   const [customerCache, setCustomerCache] = useState({})
   const [users, setUsers] = useState([])
-  const [dashboard, setDashboard] = useState({ total: 0, inactive: 0, counts: {} })
+  const [dashboard, setDashboard] = useState({
+    total: 0,
+    inactive: 0,
+    counts: {},
+    pipeline: [],
+  })
   const [hydrated, setHydrated] = useState(false)
   const [error, setError] = useState('')
 
@@ -72,8 +77,8 @@ export function CrmProvider({ children }) {
     return customer
   }, [])
 
-  const refreshCustomers = useCallback(async (search = '', page = 1, pageSize = 10) => {
-    const data = await crmApi.listCustomers(search, page, pageSize)
+  const refreshCustomers = useCallback(async (search = '', page = 1, pageSize = 10, filters = {}) => {
+    const data = await crmApi.listCustomers(search, page, pageSize, filters)
     setCustomers(data.customers || [])
     setCustomerPagination(
       data.pagination || { page, pageSize, total: data.customers?.length || 0, totalPages: 1 }
@@ -94,6 +99,7 @@ export function CrmProvider({ children }) {
       total: summary.total || 0,
       inactive: summary.inactive || 0,
       counts: summary.counts || {},
+      pipeline: summary.pipeline || [],
     }
     setDashboard(next)
     return next
@@ -149,7 +155,7 @@ export function CrmProvider({ children }) {
       setCustomerPagination({ page: 1, pageSize: 10, total: 0, totalPages: 1 })
       setCustomerCache({})
       setUsers([])
-      setDashboard({ total: 0, inactive: 0, counts: {} })
+      setDashboard({ total: 0, inactive: 0, counts: {}, pipeline: [] })
     }
   }, [])
 
