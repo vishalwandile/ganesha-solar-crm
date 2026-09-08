@@ -6,6 +6,7 @@ export const FEATURES = [
   { key: 'pmSuryaghar', label: 'PM Suryaghar' },
   { key: 'documents', label: 'Documents' },
   { key: 'payments', label: 'Payments' },
+  { key: 'pipelineFilters', label: 'Pipeline dashboard & filters' },
   { key: 'users', label: 'Users & teams' },
   { key: 'inactiveCustomer', label: 'Mark customer inactive' },
 ]

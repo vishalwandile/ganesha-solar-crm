@@ -24,6 +24,16 @@ const STAT_STYLES = {
   Completed: 'ui-stat-green',
 }
 
+function queueUrl(queue, subStage) {
+  const params = new URLSearchParams({ queue })
+  if (subStage) params.set('subStage', subStage)
+  return `/customers?${params}`
+}
+
+function statusUrl(status) {
+  return `/customers?status=${encodeURIComponent(status)}`
+}
+
 export default function Dashboard() {
   const navigate = useNavigate()
   const { loadDashboard, dashboard, quickLookup, sessionUser } = useCrm()
@@ -103,33 +113,92 @@ export default function Dashboard() {
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-5">
-        <div className="ui-stat ui-stat-orange">
+        <Link to={statusUrl('all')} className="ui-stat ui-stat-orange transition hover:ring-2 hover:ring-orange-200">
           <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-muted">
             Total customers
           </div>
           <div className="text-3xl font-extrabold tracking-tight text-ink">
             {dashboard.total}
           </div>
-        </div>
+        </Link>
         {OVERALL_STATUSES.map((status) => (
-          <div key={status} className={`ui-stat ${STAT_STYLES[status] || 'ui-stat-slate'}`}>
+          <Link
+            key={status}
+            to={statusUrl(status)}
+            className={`ui-stat ${STAT_STYLES[status] || 'ui-stat-slate'} transition hover:ring-2 hover:ring-orange-200`}
+          >
             <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-muted">
               {status}
             </div>
             <div className="text-3xl font-extrabold tracking-tight text-ink">
               {counts[status] || 0}
             </div>
-          </div>
+          </Link>
         ))}
-        <div className="ui-stat ui-stat-slate">
+        <Link to={statusUrl('Inactive')} className="ui-stat ui-stat-slate transition hover:ring-2 hover:ring-orange-200">
           <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-muted">
             Inactive
           </div>
           <div className="text-3xl font-extrabold tracking-tight text-ink">
             {dashboard.inactive || 0}
           </div>
-        </div>
+        </Link>
       </div>
+
+      {hasFeature(sessionUser, 'pipelineFilters') && (
+        <section className="space-y-3">
+          <div>
+            <h2 className="text-lg font-extrabold tracking-tight text-ink">Pending work queues</h2>
+            <p className="text-sm text-ink-muted">
+              Active customers only. Each customer appears at their first incomplete step.
+            </p>
+          </div>
+          <div className="grid gap-4 lg:grid-cols-3">
+            {(dashboard.pipeline || []).map((queue) => (
+              <div key={queue.key} className="ui-surface overflow-hidden">
+                <Link
+                  to={queueUrl(queue.key)}
+                  className="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-4 transition hover:bg-slate-50"
+                >
+                  <div>
+                    <div className="text-sm font-extrabold text-ink">{queue.label}</div>
+                    {queue.type === 'payments' && (
+                      <div className="mt-0.5 text-xs font-semibold text-orange-700">
+                        ₹{Number(queue.pendingAmount || 0).toLocaleString('en-IN')} pending
+                      </div>
+                    )}
+                  </div>
+                  <div className="rounded-xl bg-orange-50 px-3 py-1.5 text-xl font-extrabold text-orange-700 ring-1 ring-orange-100">
+                    {queue.pendingCount || 0}
+                  </div>
+                </Link>
+                {queue.type === 'stage' && (
+                  <div className="flex flex-wrap gap-2 p-4">
+                    {(queue.subStages || []).map((stage) => (
+                      <Link
+                        key={stage.key}
+                        to={queueUrl(queue.key, stage.key)}
+                        className={`rounded-xl px-3 py-2 text-xs font-semibold ring-1 transition ${
+                          stage.count
+                            ? 'bg-blue-50 text-blue-700 ring-blue-100 hover:bg-blue-100'
+                            : 'bg-slate-50 text-ink-soft ring-slate-100'
+                        }`}
+                      >
+                        {stage.label} <span className="ml-1 font-extrabold">{stage.count}</span>
+                      </Link>
+                    ))}
+                  </div>
+                )}
+                {queue.type === 'payments' && (
+                  <div className="px-5 py-4 text-xs text-ink-muted">
+                    Customers whose amount due is greater than payments and loan installments received.
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
     </Layout>
   )

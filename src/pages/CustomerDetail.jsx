@@ -87,6 +87,7 @@ export default function CustomerDetail() {
   const [editingDetails, setEditingDetails] = useState(false)
   const [detailsDraft, setDetailsDraft] = useState(null)
   const [busy, setBusy] = useState(false)
+  const [categoryDefs, setCategoryDefs] = useState(CATEGORY_DEFS)
 
   useEffect(() => {
     let alive = true
@@ -94,7 +95,13 @@ export default function CustomerDetail() {
       setLoading(true)
       setError('')
       try {
-        await loadCustomer(id)
+        const [, definitions] = await Promise.all([
+          loadCustomer(id),
+          crmApi.categoryDefinitions().catch(() => null),
+        ])
+        if (alive && definitions?.categories?.length) {
+          setCategoryDefs(definitions.categories)
+        }
       } catch (err) {
         if (alive) setError(err.message || 'Failed to load customer')
       } finally {
@@ -301,7 +308,10 @@ export default function CustomerDetail() {
   const progress = customer.totalDue
     ? Math.min(100, Math.round((totalPaid / customer.totalDue) * 100))
     : 0
-  const otherCategories = CATEGORY_DEFS.filter((c) => c.key !== 'pmSuryaghar')
+  const otherCategories = categoryDefs.filter((c) => c.key !== 'pmSuryaghar')
+  const pmSuryagharDef =
+    categoryDefs.find((category) => category.key === 'pmSuryaghar') ||
+    CATEGORY_DEFS.find((category) => category.key === 'pmSuryaghar')
 
   return (
     <Layout title={customer.name}>
@@ -408,6 +418,7 @@ export default function CustomerDetail() {
         customer={customer}
         onSelect={selectCategory}
         activeKey={tab === 'PM Suryaghar' ? 'pmSuryaghar' : expandedKey}
+        categoryDefs={categoryDefs}
       />
 
       {visibleTabs.length > 0 && (
@@ -473,6 +484,7 @@ export default function CustomerDetail() {
       {tab === 'PM Suryaghar' && (
         <PmSuryagharPortal
           customer={customer}
+          categoryDef={pmSuryagharDef}
           data={customer.categories?.pmSuryaghar}
           notes={customer.categoryNotes?.pmSuryaghar || ''}
           subsidyAmount={customer.subsidyAmount}

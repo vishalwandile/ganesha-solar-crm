@@ -4,7 +4,7 @@
   "description": "Ganesha Solar Services CRM API",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "node --test src/lib/*.test.js",
     "dev": "nodemon src/index.js",
     "dev:uat": "APP_ENV=uat nodemon src/index.js",
     "start": "node src/index.js",

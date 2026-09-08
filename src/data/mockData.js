@@ -1,5 +1,6 @@
 // Mock data for Ganesha Solar Services CRM
 // Reflects the finalized category / sub-stage structure from the requirements doc.
+import { isStageDone } from '../lib/pipeline'
 
 // Reference "today" for aging calculations, so the mock data's day-counts stay stable.
 export const CURRENT_DATE = '2026-08-11'
@@ -325,9 +326,7 @@ export function getCategoryStatus(categoryDef, customerCategoryData) {
   const values = categoryDef.subStages.map((s) => customerCategoryData[s.key])
   if (values.some((v) => v === 'Rejected')) return 'Rejected'
 
-  const isDone = (v) =>
-    ['Completed', 'Yes', 'Disbursed', 'Claimed', 'Not applicable'].includes(v) ||
-    (v === 'Approved' && categoryDef.key !== 'finance')
+  const isDone = (v) => isStageDone(categoryDef.key, v)
   const isStarted = (v) =>
     isDone(v) || ['Request submitted', 'In progress', 'Approved'].includes(v)
 
@@ -338,12 +337,11 @@ export function getCategoryStatus(categoryDef, customerCategoryData) {
   return 'Pending'
 }
 
-export function getPmSuryagharProgress(data) {
-  const def = CATEGORY_DEFS.find((c) => c.key === 'pmSuryaghar')
+export function getPmSuryagharProgress(data, categoryDef) {
+  const def = categoryDef || CATEGORY_DEFS.find((c) => c.key === 'pmSuryaghar')
   if (!data || !def) return { done: 0, total: 0, percent: 0, currentLabel: 'Not started', status: 'Pending' }
-  const doneStates = ['Completed', 'Claimed', 'Disbursed', 'Approved', 'Yes']
-  const done = def.subStages.filter((s) => doneStates.includes(data[s.key])).length
-  const firstPending = def.subStages.find((s) => !doneStates.includes(data[s.key]))
+  const done = def.subStages.filter((s) => isStageDone(def.key, data[s.key])).length
+  const firstPending = def.subStages.find((s) => !isStageDone(def.key, data[s.key]))
   const total = def.subStages.length
   return {
     done,

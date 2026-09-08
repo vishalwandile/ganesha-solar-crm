@@ -2,12 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import StatusBadge from './StatusBadge'
 import { IconChevron } from './Icons'
 import { getCategoryStatus, daysBetween } from '../data/mockData'
-
-const DONE = ['Completed', 'Claimed', 'Disbursed', 'Approved', 'Yes']
-
-function isStageDone(categoryKey, value) {
-  return DONE.includes(value) && !(categoryKey === 'finance' && value === 'Approved')
-}
+import {
+  allowedBankLoanValues,
+  currentOpenStageIndex,
+  isStageDone,
+  SEQUENTIAL_CATEGORY_KEYS,
+} from '../lib/pipeline'
 
 function dateKey(subKey) {
   return `${subKey}Date`
@@ -79,6 +79,8 @@ export default function CategoryCard({
   }, [expanded])
 
   const showFinance = categoryDef.key === 'finance' && draft.values.bankLoan && draft.values.bankLoan !== 'Not applicable'
+  const sequential = SEQUENTIAL_CATEGORY_KEYS.has(categoryDef.key)
+  const savedOpenIndex = sequential ? currentOpenStageIndex(categoryDef, data) : -1
   const installmentTotal =
     Number(draft.extra.installment1Amount || 0) + Number(draft.extra.installment2Amount || 0)
   const loanRemaining = Math.max(0, Number(draft.extra.loanAmount || 0) - installmentTotal)
@@ -196,6 +198,13 @@ export default function CategoryCard({
               (stage) => !isStageDone(categoryDef.key, draft.values[stage.key])
             )
             const isCurrent = !complete && index === firstIncomplete
+            const statusEditable = !sequential || index === savedOpenIndex
+            const dateEditable = statusEditable || (sequential && complete)
+            const canSave = statusEditable || (sequential && complete)
+            const bankLoanOptions =
+              sub.key === 'bankLoan'
+                ? allowedBankLoanValues(data?.[sub.key] || sub.options[0])
+                : null
 
             return (
             <div
@@ -229,10 +238,23 @@ export default function CategoryCard({
                       </span>
                     ) : null}
                   </div>
+                  {sequential && !statusEditable && (
+                    <div className="mt-1 text-[11px] font-medium text-ink-soft">
+                      {complete
+                        ? 'Completed · status locked; date can be corrected'
+                        : 'Complete the current step first'}
+                    </div>
+                  )}
+                  {bankLoanOptions && (
+                    <div className="mt-1 text-[11px] font-medium text-ink-soft">
+                      Save statuses in order. Rejected can be selected anytime.
+                    </div>
+                  )}
                   <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
                 <div>
                   <label className="ui-label">Status</label>
                   <select
+                    disabled={!statusEditable}
                     value={draft.values[sub.key]}
                     onChange={(e) =>
                       setDraft((d) => ({
@@ -246,10 +268,11 @@ export default function CategoryCard({
                         key={opt}
                         value={opt}
                         disabled={
-                          categoryDef.key === 'closure' &&
-                          sub.key === 'projectClosed' &&
-                          opt === 'Yes' &&
-                          !closureReady
+                          (categoryDef.key === 'closure' &&
+                            sub.key === 'projectClosed' &&
+                            opt === 'Yes' &&
+                            !closureReady) ||
+                          (bankLoanOptions && !bankLoanOptions.includes(opt))
                         }
                       >
                         {opt}
@@ -261,6 +284,7 @@ export default function CategoryCard({
                   <label className="ui-label">Date</label>
                   <input
                     type="date"
+                    disabled={!dateEditable}
                     max={today}
                     value={draft.dates[sub.key] || ''}
                     onChange={(e) =>
@@ -412,6 +436,7 @@ export default function CategoryCard({
                   className="ui-btn-primary"
                   disabled={
                     saving ||
+                    !canSave ||
                     (draft.values[sub.key] === 'Rejected' &&
                       !String(draft.rejectionReason || '').trim()) ||
                     (categoryDef.key === 'closure' && !closureReady)

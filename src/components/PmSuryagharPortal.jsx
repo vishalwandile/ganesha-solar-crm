@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import StatusBadge from './StatusBadge'
-import { CATEGORY_DEFS, calculateExpectedSubsidy, getPmSuryagharProgress, parseCapacityKW } from '../data/mockData'
+import { calculateExpectedSubsidy, getPmSuryagharProgress, parseCapacityKW } from '../data/mockData'
+import { currentOpenStageIndex, isStageDone } from '../lib/pipeline'
 
 const STAGE_HINTS = {
   application: 'Application submitted on the national PM Surya Ghar portal',
@@ -10,8 +11,6 @@ const STAGE_HINTS = {
   subsidyRequest: 'Consumer / office redeemed subsidy claim (e-token)',
   subsidy: 'Central subsidy disbursed to linked bank account',
 }
-
-const DONE = ['Completed', 'Claimed', 'Disbursed', 'Approved', 'Yes']
 
 function dateKey(subKey) {
   return `${subKey}Date`
@@ -25,6 +24,7 @@ function todayForInput() {
 
 export default function PmSuryagharPortal({
   customer,
+  categoryDef,
   data,
   notes,
   subsidyAmount,
@@ -32,7 +32,7 @@ export default function PmSuryagharPortal({
   onSave,
   saving,
 }) {
-  const def = CATEGORY_DEFS.find((c) => c.key === 'pmSuryaghar')
+  const def = categoryDef
   const initialDraft = useMemo(() => {
     const source = data || {}
     const values = {}
@@ -52,7 +52,8 @@ export default function PmSuryagharPortal({
 
   const [draft, setDraft] = useState(initialDraft)
   const [savedMsg, setSavedMsg] = useState('')
-  const progress = getPmSuryagharProgress(draft.values)
+  const progress = getPmSuryagharProgress(draft.values, def)
+  const savedOpenIndex = currentOpenStageIndex(def, data)
   const estimate = calculateExpectedSubsidy(parseCapacityKW(customer.solarCapacity))
   const today = todayForInput()
 
@@ -145,8 +146,11 @@ export default function PmSuryagharPortal({
 
         {def.subStages.map((sub, index) => {
           const value = draft.values[sub.key] || sub.options[0]
-          const complete = DONE.includes(value)
-          const isCurrent = progress.currentLabel === sub.label
+          const complete = isStageDone(def.key, value)
+          const isCurrent = index === savedOpenIndex
+          const statusEditable = index === savedOpenIndex
+          const dateEditable = statusEditable || complete
+          const canSave = statusEditable || complete
 
           return (
             <div
@@ -174,6 +178,13 @@ export default function PmSuryagharPortal({
                 <div className="min-w-0 flex-1">
                   <div className="text-sm font-bold text-ink">{sub.label}</div>
                   <div className="mt-0.5 text-xs text-ink-muted">{STAGE_HINTS[sub.key]}</div>
+                  {!statusEditable && (
+                    <div className="mt-1 text-[11px] font-medium text-ink-soft">
+                      {complete
+                        ? 'Completed · status locked; dates can be corrected'
+                        : 'Complete the current step first'}
+                    </div>
+                  )}
                   {sub.key === 'subsidy' && (
                     <div className="mt-1 text-xs font-semibold text-blue-700">
                       Est. ₹{estimate.toLocaleString('en-IN')}
@@ -183,6 +194,7 @@ export default function PmSuryagharPortal({
                     <div>
                       <label className="ui-label">Status</label>
                       <select
+                        disabled={!statusEditable}
                         value={value}
                         onChange={(e) =>
                           setDraft((d) => ({
@@ -202,6 +214,7 @@ export default function PmSuryagharPortal({
                       <label className="ui-label">Date</label>
                       <input
                         type="date"
+                        disabled={!dateEditable}
                         max={today}
                         value={draft.dates[sub.key] || ''}
                         onChange={(e) =>
@@ -222,6 +235,7 @@ export default function PmSuryagharPortal({
                     <label className="ui-label">Subsidy amount received (₹)</label>
                     <input
                       type="number"
+                      disabled={!canSave}
                       placeholder="e.g. 78000"
                       value={draft.subsidyAmount}
                       onChange={(e) => setDraft((d) => ({ ...d, subsidyAmount: e.target.value }))}
@@ -231,6 +245,7 @@ export default function PmSuryagharPortal({
                     <label className="ui-label">Subsidy received date</label>
                     <input
                       type="date"
+                      disabled={!canSave}
                       max={today}
                       value={draft.subsidyReceivedDate}
                       onChange={(e) =>
@@ -244,7 +259,7 @@ export default function PmSuryagharPortal({
                 <button
                   type="button"
                   className="ui-btn-primary"
-                  disabled={saving}
+                  disabled={saving || !canSave}
                   onClick={() => handleStageSave(sub)}
                 >
                   Save
