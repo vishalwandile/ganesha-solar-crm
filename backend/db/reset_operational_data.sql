@@ -59,11 +59,9 @@ insert into public.stage_definitions (category, sub_stage_key, label, sort_order
   ('rooftop_solar', 'app_submitted','Application Submitted', 1, array['Pending','Completed']),
 
   ('pm_suryaghar', 'application',            'Application',                    1, array['Pending','Completed']),
-  ('pm_suryaghar', 'bank_verification',      'Bank Details Verification',      2, array['Pending','Completed']),
-  ('pm_suryaghar', 'installation_uploaded',  'Installation Details Uploaded',  3, array['Pending','Completed']),
-  ('pm_suryaghar', 'discom_inspection',      'Inspection from DISCOM',         4, array['Pending','Completed']),
-  ('pm_suryaghar', 'subsidy_request',        'Subsidy Request',                5, array['Pending','Claimed']),
-  ('pm_suryaghar', 'subsidy',                'Subsidy',                        6, array['Pending','Disbursed']),
+  ('pm_suryaghar', 'installation_uploaded',  'Installation Details Uploaded',  2, array['Pending','Completed']),
+  ('pm_suryaghar', 'subsidy_request',        'Subsidy Request',                3, array['Pending','Claimed']),
+  ('pm_suryaghar', 'subsidy',                'Subsidy',                        4, array['Pending','Disbursed']),
 
   ('finance', 'bank_loan', 'Bank Loan', 1, array['Not Applicable','Request Submitted','Approved','Completed','Rejected']),
 
@@ -79,6 +77,11 @@ on conflict (category, sub_stage_key) do update
 set label = excluded.label,
     sort_order = excluded.sort_order,
     options = excluded.options;
+
+-- Retired PM Suryaghar steps. Safe here because customer_sub_stages was truncated.
+delete from public.stage_definitions
+where category = 'pm_suryaghar'
+  and sub_stage_key in ('bank_verification', 'discom_inspection');
 
 -- Optional: keep only admin logins and drop other users.
 -- Uncomment the two statements below if you also want a clean Users list.

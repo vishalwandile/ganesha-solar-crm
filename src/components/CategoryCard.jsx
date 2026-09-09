@@ -4,9 +4,11 @@ import { IconChevron } from './Icons'
 import { getCategoryStatus, daysBetween } from '../data/mockData'
 import {
   allowedBankLoanValues,
-  currentOpenStageIndex,
+  collectStageChanges,
   isStageDone,
   SEQUENTIAL_CATEGORY_KEYS,
+  stageIsSavedDone,
+  stagesDoneBefore,
 } from '../lib/pipeline'
 
 function dateKey(subKey) {
@@ -17,6 +19,10 @@ function todayForInput() {
   const now = new Date()
   const offset = now.getTimezoneOffset()
   return new Date(now.getTime() - offset * 60_000).toISOString().slice(0, 10)
+}
+
+function numOrNull(value) {
+  return value === '' || value === null || value === undefined ? null : Number(value)
 }
 
 export default function CategoryCard({
@@ -65,11 +71,13 @@ export default function CategoryCard({
   }, [categoryDef, data, notes])
 
   const [draft, setDraft] = useState(initialDraft)
-  const [savedMsg, setSavedMsg] = useState('')
+  const [savedMsg, setSavedMsg] = useState(false)
+  const [localError, setLocalError] = useState('')
   const today = todayForInput()
 
   useEffect(() => {
     setDraft(initialDraft)
+    setLocalError('')
   }, [initialDraft])
 
   useEffect(() => {
@@ -78,44 +86,91 @@ export default function CategoryCard({
     }
   }, [expanded])
 
-  const showFinance = categoryDef.key === 'finance' && draft.values.bankLoan && draft.values.bankLoan !== 'Not applicable'
+  const showFinance =
+    categoryDef.key === 'finance' &&
+    draft.values.bankLoan &&
+    draft.values.bankLoan !== 'Not applicable'
   const sequential = SEQUENTIAL_CATEGORY_KEYS.has(categoryDef.key)
-  const savedOpenIndex = sequential ? currentOpenStageIndex(categoryDef, data) : -1
   const installmentTotal =
     Number(draft.extra.installment1Amount || 0) + Number(draft.extra.installment2Amount || 0)
   const loanRemaining = Math.max(0, Number(draft.extra.loanAmount || 0) - installmentTotal)
 
-  async function handleStageSave(sub) {
-    setSavedMsg('')
-    const value = draft.values[sub.key]
-    if (value === 'Rejected' && !String(draft.rejectionReason || '').trim()) {
+  const draftExtra = {
+    bankName: draft.extra.bankName || '',
+    loanAmount: numOrNull(draft.extra.loanAmount),
+    installment1Amount: numOrNull(draft.extra.installment1Amount),
+    installment1Date: draft.extra.installment1Date || null,
+    installment2Amount: numOrNull(draft.extra.installment2Amount),
+    installment2Date: draft.extra.installment2Date || null,
+  }
+  const savedExtra = {
+    bankName: data?.bankName || '',
+    loanAmount: numOrNull(data?.loanAmount ?? ''),
+    installment1Amount: numOrNull(data?.installment1Amount ?? data?.amountReceived ?? ''),
+    installment1Date: data?.installment1Date || data?.receivedDate || null,
+    installment2Amount: numOrNull(data?.installment2Amount ?? ''),
+    installment2Date: data?.installment2Date || null,
+  }
+
+  const stageChanges = collectStageChanges(categoryDef, data, draft.values, draft.dates)
+  const notesChanged = (draft.notes || '') !== (notes || '')
+  const extraChanged =
+    showFinance &&
+    Object.keys(draftExtra).some((key) => draftExtra[key] !== savedExtra[key])
+  const rejectionChanged =
+    (draft.rejectionReason || '') !== (data?.rejectionReason || '')
+  const hasChanges =
+    stageChanges.length > 0 || notesChanged || extraChanged || rejectionChanged
+  const closingWithBlockers =
+    categoryDef.key === 'closure' && !closureReady && draft.values.projectClosed === 'Yes'
+
+  async function handleSave() {
+    setSavedMsg(false)
+    setLocalError('')
+
+    const needsReason = stageChanges.some(({ sub }) => draft.values[sub.key] === 'Rejected')
+    if (needsReason && !String(draft.rejectionReason || '').trim()) {
+      setLocalError('Rejection reason is required before saving.')
       return
     }
-    const payload = {
-      subStages: [{
-        key: sub.key,
-        value,
-        date: draft.dates[sub.key] || null,
-      }],
-      rejectionReason: draft.rejectionReason || null,
-      notes: draft.notes,
-    }
-    if (showFinance) {
-      payload.extra = {
-        bankName: draft.extra.bankName,
-        loanAmount: draft.extra.loanAmount === '' ? null : Number(draft.extra.loanAmount),
-        installment1Amount:
-          draft.extra.installment1Amount === '' ? null : Number(draft.extra.installment1Amount),
-        installment1Date: draft.extra.installment1Date || null,
-        installment2Amount:
-          draft.extra.installment2Amount === '' ? null : Number(draft.extra.installment2Amount),
-        installment2Date: draft.extra.installment2Date || null,
+
+    // The API validates each step against the stored state, so changed steps go
+    // one request at a time in pipeline order.
+    const requests = stageChanges.map(({ sub }, position) => {
+      const payload = {
+        subStages: [
+          {
+            key: sub.key,
+            value: draft.values[sub.key],
+            date: draft.dates[sub.key] || null,
+          },
+        ],
       }
+      if (String(draft.rejectionReason || '').trim()) {
+        payload.rejectionReason = draft.rejectionReason
+      }
+      if (position === 0) {
+        if (notesChanged) payload.notes = draft.notes
+        if (extraChanged) payload.extra = draftExtra
+      }
+      return payload
+    })
+
+    if (!requests.length) {
+      const payload = {}
+      if (notesChanged) payload.notes = draft.notes
+      if (extraChanged) payload.extra = draftExtra
+      if (rejectionChanged) payload.rejectionReason = draft.rejectionReason
+      if (!Object.keys(payload).length) return
+      requests.push(payload)
     }
+
     try {
-      await onSave(payload)
-      setSavedMsg(sub.key)
-      setTimeout(() => setSavedMsg(''), 2000)
+      for (const payload of requests) {
+        await onSave(payload)
+      }
+      setSavedMsg(true)
+      setTimeout(() => setSavedMsg(false), 2000)
     } catch {
       /* parent surfaces the error */
     }
@@ -181,26 +236,18 @@ export default function CategoryCard({
             </div>
           )}
 
-          <div>
-            <label className="ui-label">Notes</label>
-            <textarea
-              rows={2}
-              value={draft.notes}
-              onChange={(e) => setDraft((d) => ({ ...d, notes: e.target.value }))}
-              placeholder="Saved together with the stage you update"
-            />
-          </div>
-
           {categoryDef.subStages.map((sub, index) => {
             const value = draft.values[sub.key]
             const complete = isStageDone(categoryDef.key, value)
+            const savedDone = stageIsSavedDone(categoryDef, data, sub)
             const firstIncomplete = categoryDef.subStages.findIndex(
               (stage) => !isStageDone(categoryDef.key, draft.values[stage.key])
             )
             const isCurrent = !complete && index === firstIncomplete
-            const statusEditable = !sequential || index === savedOpenIndex
-            const dateEditable = statusEditable || (sequential && complete)
-            const canSave = statusEditable || (sequential && complete)
+            const statusEditable = sequential
+              ? !savedDone && stagesDoneBefore(categoryDef, draft.values, index)
+              : true
+            const dateEditable = statusEditable || savedDone
             const bankLoanOptions =
               sub.key === 'bankLoan'
                 ? allowedBankLoanValues(data?.[sub.key] || sub.options[0])
@@ -240,14 +287,14 @@ export default function CategoryCard({
                   </div>
                   {sequential && !statusEditable && (
                     <div className="mt-1 text-[11px] font-medium text-ink-soft">
-                      {complete
+                      {savedDone
                         ? 'Completed · status locked; date can be corrected'
-                        : 'Complete the current step first'}
+                        : 'Complete the step above first'}
                     </div>
                   )}
                   {bankLoanOptions && (
                     <div className="mt-1 text-[11px] font-medium text-ink-soft">
-                      Save statuses in order. Rejected can be selected anytime.
+                      Move one status at a time. Rejected can be selected anytime.
                     </div>
                   )}
                   <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -430,28 +477,40 @@ export default function CategoryCard({
                   </div>
                 </div>
               )}
-              <div className="mt-3 flex items-center gap-3">
-                <button
-                  type="button"
-                  className="ui-btn-primary"
-                  disabled={
-                    saving ||
-                    !canSave ||
-                    (draft.values[sub.key] === 'Rejected' &&
-                      !String(draft.rejectionReason || '').trim()) ||
-                    (categoryDef.key === 'closure' && !closureReady)
-                  }
-                  onClick={() => handleStageSave(sub)}
-                >
-                  Save
-                </button>
-                {savedMsg === sub.key && (
-                  <span className="text-sm font-semibold text-green-600">Saved</span>
-                )}
-              </div>
             </div>
             )
           })}
+
+          <div>
+            <label className="ui-label">Notes</label>
+            <textarea
+              rows={2}
+              value={draft.notes}
+              onChange={(e) => setDraft((d) => ({ ...d, notes: e.target.value }))}
+              placeholder="Saved with this category"
+            />
+          </div>
+
+          {localError && <p className="text-sm font-medium text-red-600">{localError}</p>}
+
+          <div className="flex items-center gap-3 border-t border-slate-100 pt-3">
+            <button
+              type="button"
+              className="ui-btn-primary"
+              disabled={saving || !hasChanges || closingWithBlockers}
+              onClick={handleSave}
+            >
+              Save
+            </button>
+            {hasChanges && !saving && (
+              <span className="text-xs font-medium text-ink-soft">
+                {stageChanges.length
+                  ? `${stageChanges.length} step${stageChanges.length === 1 ? '' : 's'} to update`
+                  : 'Unsaved changes'}
+              </span>
+            )}
+            {savedMsg && <span className="text-sm font-semibold text-green-600">Saved</span>}
+          </div>
         </div>
       )}
     </div>

@@ -133,11 +133,9 @@ insert into stage_definitions (category, sub_stage_key, label, sort_order, optio
   ('rooftop_solar', 'app_submitted','Application Submitted', 1, array['Pending','Completed']),
 
   ('pm_suryaghar', 'application',            'Application',                    1, array['Pending','Completed']),
-  ('pm_suryaghar', 'bank_verification',      'Bank Details Verification',      2, array['Pending','Completed']),
-  ('pm_suryaghar', 'installation_uploaded',  'Installation Details Uploaded',  3, array['Pending','Completed']),
-  ('pm_suryaghar', 'discom_inspection',      'Inspection from DISCOM',         4, array['Pending','Completed']),
-  ('pm_suryaghar', 'subsidy_request',        'Subsidy Request',                5, array['Pending','Claimed']),
-  ('pm_suryaghar', 'subsidy',                'Subsidy',                        6, array['Pending','Disbursed']),
+  ('pm_suryaghar', 'installation_uploaded',  'Installation Details Uploaded',  2, array['Pending','Completed']),
+  ('pm_suryaghar', 'subsidy_request',        'Subsidy Request',                3, array['Pending','Claimed']),
+  ('pm_suryaghar', 'subsidy',                'Subsidy',                        4, array['Pending','Disbursed']),
 
   ('finance', 'bank_loan', 'Bank Loan', 1, array['Not Applicable','Request Submitted','Approved','Completed','Rejected']),
 

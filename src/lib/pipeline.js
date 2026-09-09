@@ -41,10 +41,34 @@ export function isStageDone(categoryKey, value) {
   return false
 }
 
-export function currentOpenStageIndex(categoryDef, savedValues = {}) {
-  return categoryDef.subStages.findIndex((stage) => {
-    const value =
-      savedValues?.[stage.key] ?? savedValues?.[stage.dbKey] ?? stage.options[0]
-    return !isStageDone(categoryDef.key || categoryDef.dbKey, value)
-  })
+/**
+ * Every step before `index` is done in the given values. Driven by the draft so
+ * marking a step complete unlocks the next one before anything is saved.
+ */
+export function stagesDoneBefore(categoryDef, values = {}, index) {
+  const categoryKey = categoryDef.key || categoryDef.dbKey
+  return categoryDef.subStages
+    .slice(0, index)
+    .every((stage) => isStageDone(categoryKey, values?.[stage.key] ?? stage.options[0]))
+}
+
+export function stageIsSavedDone(categoryDef, saved, stage) {
+  return isStageDone(categoryDef.key || categoryDef.dbKey, saved?.[stage.key] ?? stage.options[0])
+}
+
+/**
+ * Steps whose status or date differ from what is stored, in pipeline order, so
+ * a single Save can send just those steps instead of the whole category.
+ */
+export function collectStageChanges(categoryDef, saved, values = {}, dates = {}) {
+  return categoryDef.subStages
+    .map((sub, index) => ({ sub, index }))
+    .filter(({ sub }) => {
+      const savedValue = saved?.[sub.key] ?? sub.options[0]
+      const savedDate = saved?.[`${sub.key}Date`] || ''
+      return (
+        (values[sub.key] ?? sub.options[0]) !== savedValue ||
+        (dates[sub.key] || '') !== savedDate
+      )
+    })
 }

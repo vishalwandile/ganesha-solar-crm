@@ -21,7 +21,7 @@ function formatDate(value) {
 }
 
 const STATUS_FILTERS = [
-  { value: '', label: 'All customers' },
+  { value: '', label: 'Any status' },
   { value: 'all', label: 'Total customers' },
   { value: 'New', label: 'New' },
   { value: 'In progress', label: 'In progress' },
@@ -29,27 +29,70 @@ const STATUS_FILTERS = [
   { value: 'Inactive', label: 'Inactive' },
 ]
 
+const QUEUE_FILTERS = [
+  { value: '', label: 'Any queue' },
+  { value: 'installation', label: 'Installation pending' },
+  { value: 'pmSuryaghar', label: 'PM Suryaghar pending' },
+  { value: 'payments', label: 'Payments pending', feature: 'payments' },
+]
+
+const EMPTY_FILTERS = { search: '', status: '', queue: '', subStage: '' }
+
+// 1 … 4 5 6 … 12 — always keeps the first, last and neighbours of the current page.
+function pageItems(current, total) {
+  if (total <= 7) return Array.from({ length: total }, (_, index) => index + 1)
+  const first = Math.max(2, Math.min(current - 1, total - 4))
+  const last = Math.min(total - 1, Math.max(current + 1, 5))
+  const items = [1]
+  if (first > 2) items.push('start-gap')
+  for (let p = first; p <= last; p += 1) items.push(p)
+  if (last < total - 1) items.push('end-gap')
+  items.push(total)
+  return items
+}
+
 export default function CustomerList() {
   const { customers, customerPagination, refreshCustomers, sessionUser } = useCrm()
   const [searchParams, setSearchParams] = useSearchParams()
-  const [query, setQuery] = useState('')
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
   const [categoryDefs, setCategoryDefs] = useState([])
+
   const canFilterPipeline = hasFeature(sessionUser, 'pipelineFilters')
+  const canSeePayments = hasFeature(sessionUser, 'payments')
+  const queueOptions = QUEUE_FILTERS.filter(
+    (option) => !option.feature || hasFeature(sessionUser, option.feature)
+  )
+
+  // Applied filters live in the URL so dashboard links and shared links work.
+  const appliedSearch = searchParams.get('search') || ''
   const requestedQueue = canFilterPipeline ? searchParams.get('queue') || '' : ''
-  const permittedQueues = hasFeature(sessionUser, 'payments')
+  const permittedQueues = canSeePayments
     ? ['installation', 'pmSuryaghar', 'payments']
     : ['installation', 'pmSuryaghar']
-  const queue = permittedQueues.includes(requestedQueue)
-    ? requestedQueue
-    : ''
-  const subStage = queue && queue !== 'payments' ? searchParams.get('subStage') || '' : ''
+  const appliedQueue = permittedQueues.includes(requestedQueue) ? requestedQueue : ''
+  const appliedSubStage =
+    appliedQueue && appliedQueue !== 'payments' ? searchParams.get('subStage') || '' : ''
   const requestedStatus = searchParams.get('status') || ''
-  const status = STATUS_FILTERS.some((item) => item.value === requestedStatus)
+  const appliedStatus = STATUS_FILTERS.some((item) => item.value === requestedStatus)
     ? requestedStatus
     : ''
-  const selectedCategory = categoryDefs.find((category) => category.key === queue)
+
+  const [draft, setDraft] = useState({
+    search: appliedSearch,
+    status: appliedStatus,
+    queue: appliedQueue,
+    subStage: appliedSubStage,
+  })
+
+  useEffect(() => {
+    setDraft({
+      search: appliedSearch,
+      status: appliedStatus,
+      queue: appliedQueue,
+      subStage: appliedSubStage,
+    })
+  }, [appliedSearch, appliedStatus, appliedQueue, appliedSubStage])
 
   useEffect(() => {
     if (!canFilterPipeline) return
@@ -59,142 +102,255 @@ export default function CustomerList() {
       .catch(() => setCategoryDefs([]))
   }, [canFilterPipeline])
 
+  // Only applied filters and paging trigger a request.
   useEffect(() => {
     let alive = true
     setLoading(true)
-    const t = setTimeout(async () => {
+    ;(async () => {
       try {
-        await refreshCustomers(query.trim(), page, 10, { queue, subStage, status })
+        await refreshCustomers(appliedSearch.trim(), page, 10, {
+          queue: appliedQueue,
+          subStage: appliedSubStage,
+          status: appliedStatus,
+        })
       } finally {
         if (alive) setLoading(false)
       }
-    }, 250)
+    })()
     return () => {
       alive = false
-      clearTimeout(t)
     }
-  }, [query, page, queue, subStage, status, refreshCustomers])
+  }, [appliedSearch, appliedQueue, appliedSubStage, appliedStatus, page, refreshCustomers])
 
-  function setListFilters({ nextQueue = queue, nextSubStage = subStage, nextStatus = status } = {}) {
-    const next = new URLSearchParams()
-    if (nextQueue) next.set('queue', nextQueue)
-    if (nextQueue && nextQueue !== 'payments' && nextSubStage) next.set('subStage', nextSubStage)
-    if (nextStatus) next.set('status', nextStatus)
-    setSearchParams(next)
+  const draftCategory = categoryDefs.find((category) => category.key === draft.queue)
+  const appliedCategory = categoryDefs.find((category) => category.key === appliedQueue)
+
+  const dirty =
+    draft.search.trim() !== appliedSearch.trim() ||
+    draft.status !== appliedStatus ||
+    draft.queue !== appliedQueue ||
+    draft.subStage !== appliedSubStage
+  const hasApplied = Boolean(appliedSearch || appliedStatus || appliedQueue || appliedSubStage)
+  const totalPages = Math.max(1, Number(customerPagination.totalPages) || 1)
+
+  function pushFilters(next) {
+    const params = new URLSearchParams()
+    if (next.search?.trim()) params.set('search', next.search.trim())
+    if (next.status) params.set('status', next.status)
+    if (next.queue) params.set('queue', next.queue)
+    if (next.queue && next.queue !== 'payments' && next.subStage) {
+      params.set('subStage', next.subStage)
+    }
+    setSearchParams(params)
     setPage(1)
   }
 
-  function setPipelineFilter(nextQueue, nextSubStage = '') {
-    setListFilters({ nextQueue, nextSubStage, nextStatus: status })
+  function handleSearch(event) {
+    event?.preventDefault()
+    pushFilters(draft)
+  }
+
+  function clearFilters() {
+    setDraft(EMPTY_FILTERS)
+    pushFilters(EMPTY_FILTERS)
+  }
+
+  function removeApplied(key) {
+    const next = {
+      search: appliedSearch,
+      status: appliedStatus,
+      queue: appliedQueue,
+      subStage: appliedSubStage,
+      [key]: '',
+    }
+    if (key === 'queue') next.subStage = ''
+    pushFilters(next)
+  }
+
+  const activeChips = []
+  if (appliedSearch) activeChips.push({ key: 'search', label: `“${appliedSearch}”` })
+  if (appliedStatus) {
+    activeChips.push({
+      key: 'status',
+      label: STATUS_FILTERS.find((item) => item.value === appliedStatus)?.label || appliedStatus,
+    })
+  }
+  if (appliedQueue) {
+    activeChips.push({
+      key: 'queue',
+      label: QUEUE_FILTERS.find((item) => item.value === appliedQueue)?.label || appliedQueue,
+    })
+  }
+  if (appliedSubStage) {
+    activeChips.push({
+      key: 'subStage',
+      label:
+        appliedCategory?.subStages.find((stage) => stage.key === appliedSubStage)?.label ||
+        appliedSubStage,
+    })
   }
 
   return (
     <Layout title="Customers" subtitle="Search and manage solar consumers">
-      <div className="ui-surface flex flex-col gap-4 p-4 sm:flex-row sm:items-end sm:justify-between">
-        <div className="w-full max-w-xl">
-          <label htmlFor="customer-search" className="ui-label">
-            Find a customer
-          </label>
-          <div className="relative">
-            <IconSearch className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-blue-600" />
-            <input
-              id="customer-search"
-              type="search"
-              value={query}
-              onChange={(e) => {
-                setQuery(e.target.value)
-                setPage(1)
-              }}
-              placeholder="Name, consumer number, or mobile"
-              className="h-12 pl-12 pr-11"
-            />
-            {query && (
-              <button
-                type="button"
-                onClick={() => {
-                  setQuery('')
-                  setPage(1)
-                }}
-                className="absolute right-2 top-1/2 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-lg text-ink-soft transition hover:bg-slate-100 hover:text-ink"
-                aria-label="Clear search"
-              >
-                <IconClose className="h-4 w-4" />
-              </button>
-            )}
+      <form className="ui-surface p-4 sm:p-5" onSubmit={handleSearch}>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+              <IconSearch className="h-4 w-4" />
+            </span>
+            <div>
+              <div className="text-sm font-bold text-ink">Search &amp; filters</div>
+              <div className="text-xs text-ink-muted">
+                Choose your filters, then press Search
+              </div>
+            </div>
           </div>
-          <p className="mt-1.5 text-xs text-ink-soft">
-            {query.trim()
-              ? `${customerPagination.total} matching customer${customerPagination.total === 1 ? '' : 's'}`
-              : `${customerPagination.total} total customer${customerPagination.total === 1 ? '' : 's'}`}
-          </p>
+          {hasFeature(sessionUser, 'createCustomer') && (
+            <Link to="/customers/new" className="ui-btn-primary shrink-0">
+              <IconPlus className="h-4 w-4" />
+              Add customer
+            </Link>
+          )}
         </div>
-        {hasFeature(sessionUser, 'createCustomer') && (
-          <Link to="/customers/new" className="ui-btn-primary shrink-0">
-            <IconPlus className="h-4 w-4" />
-            Add customer
-          </Link>
-        )}
-      </div>
 
-      <div className="ui-surface grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_1fr_auto] sm:items-end">
+        <div
+          className={`grid gap-3 sm:grid-cols-2 ${
+            canFilterPipeline
+              ? 'lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)]'
+              : 'lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)]'
+          }`}
+        >
+          <div>
+            <label htmlFor="customer-search" className="ui-label">
+              Name, consumer number, or mobile
+            </label>
+            <div className="relative">
+              <IconSearch className="pointer-events-none absolute left-3.5 top-1/2 h-5 w-5 -translate-y-1/2 text-blue-600" />
+              <input
+                id="customer-search"
+                type="text"
+                value={draft.search}
+                onChange={(event) => setDraft((d) => ({ ...d, search: event.target.value }))}
+                placeholder="Start typing, then press Search"
+                className="h-11 !pl-11 !pr-10"
+              />
+              {draft.search && (
+                <button
+                  type="button"
+                  onClick={() => setDraft((d) => ({ ...d, search: '' }))}
+                  className="absolute right-2 top-1/2 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-lg text-ink-soft transition hover:bg-slate-100 hover:text-ink"
+                  aria-label="Clear search text"
+                >
+                  <IconClose className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+          </div>
+
           <div>
             <label className="ui-label">Status</label>
             <select
-              value={status}
-              onChange={(event) =>
-                setListFilters({ nextQueue: queue, nextSubStage: subStage, nextStatus: event.target.value })
-              }
+              className="h-11"
+              value={draft.status}
+              onChange={(event) => setDraft((d) => ({ ...d, status: event.target.value }))}
             >
               {STATUS_FILTERS.map((item) => (
-                <option key={item.value || 'all-customers'} value={item.value}>
+                <option key={item.value || 'any-status'} value={item.value}>
                   {item.label}
                 </option>
               ))}
             </select>
           </div>
+
           {canFilterPipeline && (
-          <>
-          <div>
-            <label className="ui-label">Pending queue</label>
-            <select value={queue} onChange={(event) => setPipelineFilter(event.target.value)}>
-              <option value="">All customers</option>
-              <option value="installation">Installation pending</option>
-              <option value="pmSuryaghar">PM Suryaghar pending</option>
-              {hasFeature(sessionUser, 'payments') && (
-                <option value="payments">Payments pending</option>
-              )}
-            </select>
-          </div>
-          <div>
-            <label className="ui-label">Current pending step</label>
-            <select
-              value={subStage}
-              disabled={!selectedCategory}
-              onChange={(event) => setPipelineFilter(queue, event.target.value)}
-            >
-              <option value="">All pending steps</option>
-              {(selectedCategory?.subStages || []).map((stage) => (
-                <option key={stage.key} value={stage.key}>
-                  {stage.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          </>
+            <>
+              <div>
+                <label className="ui-label">Pending queue</label>
+                <select
+                  className="h-11"
+                  value={draft.queue}
+                  onChange={(event) =>
+                    setDraft((d) => ({ ...d, queue: event.target.value, subStage: '' }))
+                  }
+                >
+                  {queueOptions.map((item) => (
+                    <option key={item.value || 'any-queue'} value={item.value}>
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="ui-label">Pending step</label>
+                <select
+                  className="h-11"
+                  value={draft.subStage}
+                  disabled={!draftCategory}
+                  onChange={(event) => setDraft((d) => ({ ...d, subStage: event.target.value }))}
+                >
+                  <option value="">All steps</option>
+                  {(draftCategory?.subStages || []).map((stage) => (
+                    <option key={stage.key} value={stage.key}>
+                      {stage.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </>
           )}
+        </div>
+
+        <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
+          <button type="submit" className="ui-btn-primary" disabled={loading}>
+            <IconSearch className="h-4 w-4" />
+            Search
+          </button>
           <button
             type="button"
             className="ui-btn-secondary"
-            disabled={!queue && !status}
-            onClick={() => setListFilters({ nextQueue: '', nextSubStage: '', nextStatus: '' })}
+            disabled={!hasApplied && !dirty}
+            onClick={clearFilters}
           >
-            Clear filters
+            Reset
           </button>
+          {dirty && (
+            <span className="text-xs font-semibold text-orange-700">
+              Filters changed — press Search to apply
+            </span>
+          )}
+          <span className="ml-auto text-xs font-medium text-ink-muted">
+            {customerPagination.total} customer{customerPagination.total === 1 ? '' : 's'} found
+          </span>
         </div>
+
+        {activeChips.length > 0 && (
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <span className="text-[11px] font-bold uppercase tracking-wide text-ink-soft">
+              Applied
+            </span>
+            {activeChips.map((chip) => (
+              <span
+                key={chip.key}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-orange-50 px-2.5 py-1 text-xs font-semibold text-orange-700 ring-1 ring-orange-100"
+              >
+                {chip.label}
+                <button
+                  type="button"
+                  onClick={() => removeApplied(chip.key)}
+                  className="grid h-4 w-4 place-items-center rounded transition hover:bg-orange-200/70"
+                  aria-label={`Remove filter ${chip.label}`}
+                >
+                  <IconClose className="h-3 w-3" />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+      </form>
 
       <div className="ui-surface overflow-hidden">
         <div className="overflow-x-auto">
-          <table className={`w-full text-sm ${queue ? 'min-w-[1180px]' : 'min-w-[860px]'}`}>
+          <table className={`w-full text-sm ${appliedQueue ? 'min-w-[1180px]' : 'min-w-[860px]'}`}>
             <thead>
               <tr className="border-b border-slate-100 bg-slate-50/80 text-left">
                 <th className="px-5 py-3.5 text-xs font-bold uppercase tracking-wide text-ink-muted">Name</th>
@@ -208,7 +364,7 @@ export default function CustomerList() {
                 <th className="px-5 py-3.5 text-xs font-bold uppercase tracking-wide text-ink-muted">
                   Capacity
                 </th>
-                {queue && queue !== 'payments' && (
+                {appliedQueue && appliedQueue !== 'payments' && (
                   <>
                     <th className="px-5 py-3.5 text-xs font-bold uppercase tracking-wide text-ink-muted">
                       Current step
@@ -218,7 +374,7 @@ export default function CustomerList() {
                     </th>
                   </>
                 )}
-                {queue === 'payments' && (
+                {appliedQueue === 'payments' && (
                   <>
                     <th className="px-5 py-3.5 text-xs font-bold uppercase tracking-wide text-ink-muted">
                       Due
@@ -253,7 +409,7 @@ export default function CustomerList() {
                       {c.solarCapacity || '—'}
                     </span>
                   </td>
-                  {queue && queue !== 'payments' && (
+                  {appliedQueue && appliedQueue !== 'payments' && (
                     <>
                       <td className="px-5 py-3.5">
                         <div className="font-semibold text-orange-700">
@@ -273,7 +429,7 @@ export default function CustomerList() {
                       </td>
                     </>
                   )}
-                  {queue === 'payments' && (
+                  {appliedQueue === 'payments' && (
                     <>
                       <td className="px-5 py-3.5 font-semibold text-ink">
                         ₹{Number(c.pipeline?.totalDue || 0).toLocaleString('en-IN')}
@@ -307,10 +463,10 @@ export default function CustomerList() {
               {!loading && customers.length === 0 && (
                 <tr>
                   <td
-                    colSpan={queue === 'payments' ? 10 : queue ? 9 : 7}
+                    colSpan={appliedQueue === 'payments' ? 10 : appliedQueue ? 9 : 7}
                     className="px-5 py-10 text-center text-sm text-ink-soft"
                   >
-                    No customers match your search.
+                    No customers match these filters.
                   </td>
                 </tr>
               )}
@@ -319,9 +475,10 @@ export default function CustomerList() {
         </div>
         <div className="flex flex-col gap-2 border-t border-slate-100 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
           <span className="text-xs text-ink-muted">
-            {customerPagination.total} customer{customerPagination.total === 1 ? '' : 's'}
+            {customerPagination.total} customer{customerPagination.total === 1 ? '' : 's'} · page{' '}
+            {page} of {totalPages}
           </span>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1.5">
             <button
               type="button"
               className="ui-btn-secondary px-3 py-1.5 text-xs"
@@ -330,13 +487,32 @@ export default function CustomerList() {
             >
               Previous
             </button>
-            <span className="text-xs font-semibold text-ink">
-              Page {customerPagination.page} of {customerPagination.totalPages}
-            </span>
+            {pageItems(page, totalPages).map((item) =>
+              typeof item === 'number' ? (
+                <button
+                  key={item}
+                  type="button"
+                  aria-current={item === page ? 'page' : undefined}
+                  disabled={loading}
+                  onClick={() => setPage(item)}
+                  className={`h-8 min-w-8 rounded-lg px-2 text-xs font-bold tabular-nums transition disabled:opacity-50 ${
+                    item === page
+                      ? 'bg-orange-500 text-white shadow-soft'
+                      : 'border border-slate-200 bg-white text-ink hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700'
+                  }`}
+                >
+                  {item}
+                </button>
+              ) : (
+                <span key={item} className="px-1 text-xs font-semibold text-ink-soft">
+                  …
+                </span>
+              )
+            )}
             <button
               type="button"
               className="ui-btn-secondary px-3 py-1.5 text-xs"
-              disabled={loading || page >= customerPagination.totalPages}
+              disabled={loading || page >= totalPages}
               onClick={() => setPage((current) => current + 1)}
             >
               Next
