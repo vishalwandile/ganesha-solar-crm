@@ -154,6 +154,30 @@ async function main() {
       set options = array['Not Applicable','Request Submitted','Approved','Completed','Rejected']
       where category = 'finance' and sub_stage_key = 'bank_loan'
     `)
+    // Bank Details Verification and Inspection from DISCOM are retired PM
+    // Suryaghar steps. Drop the saved values first (FK), then the definitions.
+    await client.query(`
+      delete from customer_sub_stages
+      where category = 'pm_suryaghar'
+        and sub_stage_key in ('bank_verification', 'discom_inspection')
+    `)
+    await client.query(`
+      delete from stage_definitions
+      where category = 'pm_suryaghar'
+        and sub_stage_key in ('bank_verification', 'discom_inspection')
+    `)
+    await client.query(`
+      update stage_definitions
+      set sort_order = case sub_stage_key
+        when 'application' then 1
+        when 'installation_uploaded' then 2
+        when 'subsidy_request' then 3
+        when 'subsidy' then 4
+        else sort_order
+      end
+      where category = 'pm_suryaghar'
+        and sub_stage_key in ('application', 'installation_uploaded', 'subsidy_request', 'subsidy')
+    `)
     await client.query(`
       update customer_categories
       set extra = extra || jsonb_build_object(

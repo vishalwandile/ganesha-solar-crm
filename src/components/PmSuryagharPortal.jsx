@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
 import StatusBadge from './StatusBadge'
 import { calculateExpectedSubsidy, getPmSuryagharProgress, parseCapacityKW } from '../data/mockData'
-import { currentOpenStageIndex, isStageDone } from '../lib/pipeline'
+import {
+  collectStageChanges,
+  isStageDone,
+  stageIsSavedDone,
+  stagesDoneBefore,
+} from '../lib/pipeline'
 
 const STAGE_HINTS = {
   application: 'Application submitted on the national PM Surya Ghar portal',
-  bankVerification: 'Bank account details verified for Direct Benefit Transfer',
   installationUploaded: 'Plant details, photos & documents uploaded by vendor',
-  discomInspection: 'DISCOM site inspection / commissioning clearance',
   subsidyRequest: 'Consumer / office redeemed subsidy claim (e-token)',
   subsidy: 'Central subsidy disbursed to linked bank account',
 }
@@ -51,9 +54,8 @@ export default function PmSuryagharPortal({
   }, [def, data, notes, subsidyAmount, subsidyReceivedDate])
 
   const [draft, setDraft] = useState(initialDraft)
-  const [savedMsg, setSavedMsg] = useState('')
+  const [savedMsg, setSavedMsg] = useState(false)
   const progress = getPmSuryagharProgress(draft.values, def)
-  const savedOpenIndex = currentOpenStageIndex(def, data)
   const estimate = calculateExpectedSubsidy(parseCapacityKW(customer.solarCapacity))
   const today = todayForInput()
 
@@ -61,25 +63,60 @@ export default function PmSuryagharPortal({
     setDraft(initialDraft)
   }, [initialDraft])
 
-  async function handleStageSave(sub) {
-    setSavedMsg('')
-    const payload = {
-      subStages: [{
-        key: sub.key,
-        value: draft.values[sub.key],
-        date: draft.dates[sub.key] || null,
-      }],
-      notes: draft.notes,
+  const stageChanges = collectStageChanges(def, data, draft.values, draft.dates)
+  const notesChanged = (draft.notes || '') !== (notes || '')
+  const draftSubsidyAmount = draft.subsidyAmount === '' ? null : Number(draft.subsidyAmount)
+  const savedSubsidyAmount =
+    subsidyAmount === '' || subsidyAmount === null || subsidyAmount === undefined
+      ? null
+      : Number(subsidyAmount)
+  const subsidyChanged =
+    draftSubsidyAmount !== savedSubsidyAmount ||
+    (draft.subsidyReceivedDate || '') !== (subsidyReceivedDate || '')
+  const hasChanges = stageChanges.length > 0 || notesChanged || subsidyChanged
+
+  async function handleSave() {
+    setSavedMsg(false)
+
+    // The API validates each step against the stored state, so changed steps go
+    // one request at a time in pipeline order.
+    const requests = stageChanges.map(({ sub }, position) => {
+      const payload = {
+        subStages: [
+          {
+            key: sub.key,
+            value: draft.values[sub.key],
+            date: draft.dates[sub.key] || null,
+          },
+        ],
+      }
+      if (position === 0 && notesChanged) payload.notes = draft.notes
+      if (sub.key === 'subsidy' && subsidyChanged) {
+        payload.subsidyAmount = draftSubsidyAmount
+        payload.subsidyReceivedDate = draft.subsidyReceivedDate || null
+      }
+      return payload
+    })
+
+    const subsidyHandled = stageChanges.some(({ sub }) => sub.key === 'subsidy')
+    if (!requests.length || (subsidyChanged && !subsidyHandled)) {
+      const payload = {}
+      if (notesChanged && !requests.length) payload.notes = draft.notes
+      if (subsidyChanged && !subsidyHandled) {
+        payload.subsidyAmount = draftSubsidyAmount
+        payload.subsidyReceivedDate = draft.subsidyReceivedDate || null
+      }
+      if (Object.keys(payload).length) requests.push(payload)
     }
-    if (sub.key === 'subsidy') {
-      payload.subsidyAmount =
-        draft.subsidyAmount === '' ? null : Number(draft.subsidyAmount)
-      payload.subsidyReceivedDate = draft.subsidyReceivedDate || null
-    }
+
+    if (!requests.length) return
+
     try {
-      await onSave(payload)
-      setSavedMsg(sub.key)
-      setTimeout(() => setSavedMsg(''), 2000)
+      for (const payload of requests) {
+        await onSave(payload)
+      }
+      setSavedMsg(true)
+      setTimeout(() => setSavedMsg(false), 2000)
     } catch {
       /* parent surfaces the error */
     }
@@ -98,8 +135,8 @@ export default function PmSuryagharPortal({
             </div>
             <h2 className="mt-1 text-2xl font-extrabold tracking-tight">PM Surya Ghar</h2>
             <p className="mt-1 max-w-xl text-sm text-blue-50/90">
-              Internal CRM mirror of portal stages — application → bank → installation → DISCOM →
-              subsidy claim → disbursement.
+              Internal CRM mirror of portal stages — application → installation → subsidy claim →
+              disbursement.
             </p>
           </div>
           <div className="rounded-2xl bg-white/15 px-4 py-3 backdrop-blur">
@@ -134,23 +171,16 @@ export default function PmSuryagharPortal({
       </div>
 
       <div className="space-y-3 p-4 sm:p-6">
-        <div className="rounded-2xl border border-slate-200 bg-white p-4">
-          <label className="ui-label">Portal follow-up notes</label>
-          <textarea
-            rows={2}
-            value={draft.notes}
-            onChange={(e) => setDraft((d) => ({ ...d, notes: e.target.value }))}
-            placeholder="Saved together with the stage you update"
-          />
-        </div>
-
         {def.subStages.map((sub, index) => {
           const value = draft.values[sub.key] || sub.options[0]
           const complete = isStageDone(def.key, value)
-          const isCurrent = index === savedOpenIndex
-          const statusEditable = index === savedOpenIndex
-          const dateEditable = statusEditable || complete
-          const canSave = statusEditable || complete
+          const savedDone = stageIsSavedDone(def, data, sub)
+          const statusEditable = !savedDone && stagesDoneBefore(def, draft.values, index)
+          const dateEditable = statusEditable || savedDone
+          const firstIncomplete = def.subStages.findIndex(
+            (stage) => !isStageDone(def.key, draft.values[stage.key])
+          )
+          const isCurrent = !complete && index === firstIncomplete
 
           return (
             <div
@@ -180,9 +210,9 @@ export default function PmSuryagharPortal({
                   <div className="mt-0.5 text-xs text-ink-muted">{STAGE_HINTS[sub.key]}</div>
                   {!statusEditable && (
                     <div className="mt-1 text-[11px] font-medium text-ink-soft">
-                      {complete
+                      {savedDone
                         ? 'Completed · status locked; dates can be corrected'
-                        : 'Complete the current step first'}
+                        : 'Complete the step above first'}
                     </div>
                   )}
                   {sub.key === 'subsidy' && (
@@ -235,7 +265,7 @@ export default function PmSuryagharPortal({
                     <label className="ui-label">Subsidy amount received (₹)</label>
                     <input
                       type="number"
-                      disabled={!canSave}
+                      disabled={!dateEditable}
                       placeholder="e.g. 78000"
                       value={draft.subsidyAmount}
                       onChange={(e) => setDraft((d) => ({ ...d, subsidyAmount: e.target.value }))}
@@ -245,7 +275,7 @@ export default function PmSuryagharPortal({
                     <label className="ui-label">Subsidy received date</label>
                     <input
                       type="date"
-                      disabled={!canSave}
+                      disabled={!dateEditable}
                       max={today}
                       value={draft.subsidyReceivedDate}
                       onChange={(e) =>
@@ -255,22 +285,38 @@ export default function PmSuryagharPortal({
                   </div>
                 </div>
               )}
-              <div className="mt-3 flex items-center gap-3">
-                <button
-                  type="button"
-                  className="ui-btn-primary"
-                  disabled={saving || !canSave}
-                  onClick={() => handleStageSave(sub)}
-                >
-                  Save
-                </button>
-                {savedMsg === sub.key && (
-                  <span className="text-sm font-semibold text-green-600">Saved</span>
-                )}
-              </div>
             </div>
           )
         })}
+
+        <div className="rounded-2xl border border-slate-200 bg-white p-4">
+          <label className="ui-label">Portal follow-up notes</label>
+          <textarea
+            rows={2}
+            value={draft.notes}
+            onChange={(e) => setDraft((d) => ({ ...d, notes: e.target.value }))}
+            placeholder="Saved with this category"
+          />
+        </div>
+
+        <div className="flex items-center gap-3 border-t border-slate-100 pt-3">
+          <button
+            type="button"
+            className="ui-btn-primary"
+            disabled={saving || !hasChanges}
+            onClick={handleSave}
+          >
+            Save
+          </button>
+          {hasChanges && !saving && (
+            <span className="text-xs font-medium text-ink-soft">
+              {stageChanges.length
+                ? `${stageChanges.length} step${stageChanges.length === 1 ? '' : 's'} to update`
+                : 'Unsaved changes'}
+            </span>
+          )}
+          {savedMsg && <span className="text-sm font-semibold text-green-600">Saved</span>}
+        </div>
       </div>
     </div>
   )

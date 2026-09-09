@@ -55,9 +55,7 @@ export const CATEGORY_DEFS = [
     optional: false,
     subStages: [
       { key: 'application', label: 'Application', options: ['Pending', 'Completed'] },
-      { key: 'bankVerification', label: 'Bank details verification', options: ['Pending', 'Completed'] },
       { key: 'installationUploaded', label: 'Installation details uploaded', options: ['Pending', 'Completed'] },
-      { key: 'discomInspection', label: 'Inspection from DISCOM', options: ['Pending', 'Completed'] },
       { key: 'subsidyRequest', label: 'Subsidy request', options: ['Pending', 'Claimed'] },
       { key: 'subsidy', label: 'Subsidy', options: ['Pending', 'Disbursed'] },
     ],
@@ -133,7 +131,7 @@ export const CUSTOMERS = [
     categories: {
       nameChange: { docReceived: 'Completed', appSubmitted: 'Completed', demand: 'Pending', application: 'Rejected', rejectionReason: 'Name mismatch between Aadhaar and electricity bill' },
       rooftopSolar: { appSubmitted: 'Completed' },
-      pmSuryaghar: { application: 'Completed', bankVerification: 'Completed', installationUploaded: 'Pending', discomInspection: 'Pending', subsidyRequest: 'Pending', subsidy: 'Pending' },
+      pmSuryaghar: { application: 'Completed', installationUploaded: 'Pending', subsidyRequest: 'Pending', subsidy: 'Pending' },
       finance: { bankLoan: 'Not applicable' },
       installation: { fabricationMaterial: 'Yes', fabricationWork: 'Completed', panelInstallation: 'Completed', wiring: 'Pending', releaseOrder: 'Pending', meterInstallation: 'Pending' },
       closure: { projectClosed: 'No' },
@@ -148,7 +146,7 @@ export const CUSTOMERS = [
     },
     categoryNotes: {
       nameChange: 'Rejected due to name mismatch — asked customer for a fresh affidavit.',
-      pmSuryaghar: 'Waiting on DISCOM inspection slot, follow up Friday.',
+      pmSuryaghar: 'Waiting on subsidy claim approval, follow up Friday.',
     },
     documents: [
       { type: 'Aadhaar', fileName: 'suresh_aadhaar.pdf', uploadedAt: '2026-06-02' },
@@ -189,7 +187,7 @@ export const CUSTOMERS = [
     categories: {
       nameChange: null,
       rooftopSolar: { appSubmitted: 'Completed' },
-      pmSuryaghar: { application: 'Completed', bankVerification: 'Completed', installationUploaded: 'Completed', discomInspection: 'Completed', subsidyRequest: 'Claimed', subsidy: 'Disbursed' },
+      pmSuryaghar: { application: 'Completed', installationUploaded: 'Completed', subsidyRequest: 'Claimed', subsidy: 'Disbursed' },
       finance: { bankLoan: 'Not applicable' },
       installation: { fabricationMaterial: 'Yes', fabricationWork: 'Completed', panelInstallation: 'Completed', wiring: 'Completed', releaseOrder: 'Completed', meterInstallation: 'Completed' },
       closure: { projectClosed: 'Yes' },
@@ -243,7 +241,7 @@ export const CUSTOMERS = [
     categories: {
       nameChange: null,
       rooftopSolar: { appSubmitted: 'Completed' },
-      pmSuryaghar: { application: 'Completed', bankVerification: 'Pending', installationUploaded: 'Pending', discomInspection: 'Pending', subsidyRequest: 'Pending', subsidy: 'Pending' },
+      pmSuryaghar: { application: 'Completed', installationUploaded: 'Pending', subsidyRequest: 'Pending', subsidy: 'Pending' },
       finance: { bankLoan: 'Rejected', bankName: 'Bank of Maharashtra', loanAmount: 200000, amountReceived: 0, receivedDate: null, rejectionReason: 'Insufficient income documentation' },
       installation: { fabricationMaterial: 'No', fabricationWork: 'Pending', panelInstallation: 'Pending', wiring: 'Pending', releaseOrder: 'Pending', meterInstallation: 'Pending' },
       closure: { projectClosed: 'No' },
@@ -289,7 +287,7 @@ export const CUSTOMERS = [
     categories: {
       nameChange: null,
       rooftopSolar: { appSubmitted: 'Pending' },
-      pmSuryaghar: { application: 'Pending', bankVerification: 'Pending', installationUploaded: 'Pending', discomInspection: 'Pending', subsidyRequest: 'Pending', subsidy: 'Pending' },
+      pmSuryaghar: { application: 'Pending', installationUploaded: 'Pending', subsidyRequest: 'Pending', subsidy: 'Pending' },
       finance: { bankLoan: 'Not applicable' },
       installation: { fabricationMaterial: 'No', fabricationWork: 'Pending', panelInstallation: 'Pending', wiring: 'Pending', releaseOrder: 'Pending', meterInstallation: 'Pending' },
       closure: { projectClosed: 'No' },

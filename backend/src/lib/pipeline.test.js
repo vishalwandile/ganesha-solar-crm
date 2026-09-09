@@ -56,6 +56,21 @@ test('allows current stage progress and completed-stage date correction', () => 
   )
 })
 
+test('one UI save advances two steps only when sent as ordered requests', () => {
+  const batched = { material: 'No', work: 'Pending', meter: 'Pending' }
+  // Both steps in a single request: the second is validated against stored state.
+  assert.equal(stageChangeLock(installation, batched, 'material', 'Yes', null).allowed, true)
+  assert.equal(stageChangeLock(installation, batched, 'work', 'Completed', null).allowed, false)
+
+  // Sequential requests: each one is applied before the next is validated.
+  const sequential = { material: 'No', work: 'Pending', meter: 'Pending' }
+  assert.equal(stageChangeLock(installation, sequential, 'material', 'Yes', null).allowed, true)
+  sequential.material = 'Yes'
+  assert.equal(stageChangeLock(installation, sequential, 'work', 'Completed', null).allowed, true)
+  sequential.work = 'Completed'
+  assert.equal(stageChangeLock(installation, sequential, 'meter', 'Completed', null).allowed, true)
+})
+
 test('uses category-aware completion and installment-aware receipts', () => {
   assert.equal(isStageDone('finance', 'Approved'), false)
   assert.equal(isStageDone('nameChange', 'Approved'), true)

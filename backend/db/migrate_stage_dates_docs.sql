@@ -96,6 +96,27 @@ update stage_definitions
 set options = array['Not Applicable','Request Submitted','Approved','Completed','Rejected']
 where category = 'finance' and sub_stage_key = 'bank_loan';
 
+-- Bank Details Verification and Inspection from DISCOM are retired PM Suryaghar
+-- steps. Saved values go first because customer_sub_stages FKs the definitions.
+delete from customer_sub_stages
+where category = 'pm_suryaghar'
+  and sub_stage_key in ('bank_verification', 'discom_inspection');
+
+delete from stage_definitions
+where category = 'pm_suryaghar'
+  and sub_stage_key in ('bank_verification', 'discom_inspection');
+
+update stage_definitions
+set sort_order = case sub_stage_key
+  when 'application' then 1
+  when 'installation_uploaded' then 2
+  when 'subsidy_request' then 3
+  when 'subsidy' then 4
+  else sort_order
+end
+where category = 'pm_suryaghar'
+  and sub_stage_key in ('application', 'installation_uploaded', 'subsidy_request', 'subsidy');
+
 -- Preserve every existing loan receipt by treating the legacy single receipt
 -- as installment 1. Re-runnable: never overwrites installment data.
 update customer_categories
