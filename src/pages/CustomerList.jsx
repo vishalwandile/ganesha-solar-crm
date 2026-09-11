@@ -38,17 +38,17 @@ const QUEUE_FILTERS = [
 
 const EMPTY_FILTERS = { search: '', status: '', queue: '', subStage: '' }
 
-// 1 … 4 5 6 … 12 — always keeps the first, last and neighbours of the current page.
+// Sliding window: two pages either side of the current one, so a 100-page list
+// still shows five buttons and the numbers move along as you page.
+const PAGE_WINDOW = 5
+
 function pageItems(current, total) {
-  if (total <= 7) return Array.from({ length: total }, (_, index) => index + 1)
-  const first = Math.max(2, Math.min(current - 1, total - 4))
-  const last = Math.min(total - 1, Math.max(current + 1, 5))
-  const items = [1]
-  if (first > 2) items.push('start-gap')
-  for (let p = first; p <= last; p += 1) items.push(p)
-  if (last < total - 1) items.push('end-gap')
-  items.push(total)
-  return items
+  const span = Math.min(PAGE_WINDOW, total)
+  const start = Math.min(
+    Math.max(1, current - Math.floor(span / 2)),
+    Math.max(1, total - span + 1)
+  )
+  return Array.from({ length: span }, (_, index) => start + index)
 }
 
 export default function CustomerList() {
@@ -487,28 +487,22 @@ export default function CustomerList() {
             >
               Previous
             </button>
-            {pageItems(page, totalPages).map((item) =>
-              typeof item === 'number' ? (
-                <button
-                  key={item}
-                  type="button"
-                  aria-current={item === page ? 'page' : undefined}
-                  disabled={loading}
-                  onClick={() => setPage(item)}
-                  className={`h-8 min-w-8 rounded-lg px-2 text-xs font-bold tabular-nums transition disabled:opacity-50 ${
-                    item === page
-                      ? 'bg-orange-500 text-white shadow-soft'
-                      : 'border border-slate-200 bg-white text-ink hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700'
-                  }`}
-                >
-                  {item}
-                </button>
-              ) : (
-                <span key={item} className="px-1 text-xs font-semibold text-ink-soft">
-                  …
-                </span>
-              )
-            )}
+            {pageItems(page, totalPages).map((item) => (
+              <button
+                key={item}
+                type="button"
+                aria-current={item === page ? 'page' : undefined}
+                disabled={loading}
+                onClick={() => setPage(item)}
+                className={`h-8 min-w-8 rounded-lg px-2 text-xs font-bold tabular-nums transition disabled:opacity-50 ${
+                  item === page
+                    ? 'bg-orange-500 text-white shadow-soft'
+                    : 'border border-slate-200 bg-white text-ink hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700'
+                }`}
+              >
+                {item}
+              </button>
+            ))}
             <button
               type="button"
               className="ui-btn-secondary px-3 py-1.5 text-xs"
