@@ -3,7 +3,6 @@ import StatusBadge from './StatusBadge'
 import { IconChevron } from './Icons'
 import { getCategoryStatus, daysBetween } from '../data/mockData'
 import {
-  allowedBankLoanValues,
   collectStageChanges,
   isStageDone,
   SEQUENTIAL_CATEGORY_KEYS,
@@ -248,10 +247,6 @@ export default function CategoryCard({
               ? !savedDone && stagesDoneBefore(categoryDef, draft.values, index)
               : true
             const dateEditable = statusEditable || savedDone
-            const bankLoanOptions =
-              sub.key === 'bankLoan'
-                ? allowedBankLoanValues(data?.[sub.key] || sub.options[0])
-                : null
 
             return (
             <div
@@ -292,11 +287,6 @@ export default function CategoryCard({
                         : 'Complete the step above first'}
                     </div>
                   )}
-                  {bankLoanOptions && (
-                    <div className="mt-1 text-[11px] font-medium text-ink-soft">
-                      Move one status at a time. Rejected can be selected anytime.
-                    </div>
-                  )}
                   <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
                 <div>
                   <label className="ui-label">Status</label>
@@ -315,11 +305,10 @@ export default function CategoryCard({
                         key={opt}
                         value={opt}
                         disabled={
-                          (categoryDef.key === 'closure' &&
-                            sub.key === 'projectClosed' &&
-                            opt === 'Yes' &&
-                            !closureReady) ||
-                          (bankLoanOptions && !bankLoanOptions.includes(opt))
+                          categoryDef.key === 'closure' &&
+                          sub.key === 'projectClosed' &&
+                          opt === 'Yes' &&
+                          !closureReady
                         }
                       >
                         {opt}
@@ -347,7 +336,8 @@ export default function CategoryCard({
               </div>
               {categoryDef.key === 'closure' && !closureReady && (
                 <p className="mt-2 text-xs font-medium text-orange-700">
-                  Complete {closureBlockers.join(', ')} before marking this project closed.
+                  Closure requires every applicable section to be completed and 100% payment
+                  collection. Pending: {closureBlockers.join(', ')}.
                 </p>
               )}
               {draft.values[sub.key] === 'Rejected' && (

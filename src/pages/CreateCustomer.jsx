@@ -46,6 +46,7 @@ const FIELD_GROUPS = [
   },
 ]
 const ALLOWED_UPLOAD_EXTENSIONS = /\.(pdf|doc|docx|png|jpe?g)$/i
+const IMAGE_UPLOAD_EXTENSIONS = /\.(png|jpe?g)$/i
 
 export default function CreateCustomer() {
   const navigate = useNavigate()
@@ -108,9 +109,15 @@ export default function CreateCustomer() {
     }
     for (const file of Object.values(files)) {
       if (!file) continue
-      if (file.size > 500 * 1024) errors.files = 'Every file must be 500 KB or smaller.'
       if (!ALLOWED_UPLOAD_EXTENSIONS.test(file.name)) {
         errors.files = 'Only PDF, DOC, DOCX, PNG, JPG, and JPEG files are allowed.'
+        continue
+      }
+      const isImage = IMAGE_UPLOAD_EXTENSIONS.test(file.name)
+      if (file.size > (isImage ? 1024 * 1024 : 250 * 1024)) {
+        errors.files = isImage
+          ? 'Images must be 1 MB or smaller.'
+          : 'PDF, DOC, and DOCX files must be 250 KB or smaller.'
       }
     }
 
@@ -215,7 +222,7 @@ export default function CreateCustomer() {
           <div className="border-b border-slate-100 px-5 py-4">
             <div className="text-sm font-bold text-ink">Documents</div>
             <div className="text-xs text-ink-muted">
-              PDF, DOC, DOCX, PNG, JPG, or JPEG · maximum 500 KB
+              Images up to 1 MB (compressed below 250 KB). PDF, DOC, and DOCX up to 250 KB.
             </div>
           </div>
           <div className="grid grid-cols-1 gap-3 p-5 sm:grid-cols-3">

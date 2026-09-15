@@ -50,6 +50,7 @@ const EDIT_FIELDS = [
 
 const UPLOAD_TYPES = [...DOCUMENT_TYPES, 'Photo / Image']
 const ALLOWED_EXTENSIONS = /\.(pdf|doc|docx|png|jpe?g)$/i
+const IMAGE_EXTENSIONS = /\.(png|jpe?g)$/i
 
 function todayForInput() {
   const now = new Date()
@@ -188,12 +189,18 @@ export default function CustomerDetail() {
     const file = e.target.files?.[0]
     e.target.value = ''
     if (!file) return
-    if (file.size > 500 * 1024) {
-      setError('File must be 500 KB or smaller.')
-      return
-    }
     if (!ALLOWED_EXTENSIONS.test(file.name)) {
       setError('Only PDF, DOC, DOCX, PNG, JPG, and JPEG files are allowed.')
+      return
+    }
+    const isImage = IMAGE_EXTENSIONS.test(file.name)
+    const maxBytes = isImage ? 1024 * 1024 : 250 * 1024
+    if (file.size > maxBytes) {
+      setError(
+        isImage
+          ? 'Images must be 1 MB or smaller.'
+          : 'PDF, DOC, and DOCX files must be 250 KB or smaller.'
+      )
       return
     }
     if (docType === 'Other' && !docCustomName.trim()) {
@@ -537,7 +544,8 @@ export default function CustomerDetail() {
               </label>
             </div>
             <p className="mt-2 text-xs text-ink-muted">
-              PDF, DOC, DOCX, PNG, JPG, or JPEG · maximum 500 KB. Images are compressed before upload.
+              PNG, JPG, or JPEG up to 1 MB (compressed below 250 KB before storage).
+              PDF, DOC, and DOCX must be 250 KB or smaller.
             </p>
             {docType === 'Other' && (
               <p className="mt-2 text-xs text-ink-muted">Type the document name, then choose the file to upload.</p>

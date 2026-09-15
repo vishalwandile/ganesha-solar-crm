@@ -101,31 +101,25 @@ const finance = {
   ],
 }
 
-test('bank loan must advance one status at a time except rejected', () => {
-  const current = { bankLoan: 'Not applicable' }
+test('bank loan accepts any status from any status', () => {
+  const options = finance.subStages[0].options
+  for (const from of options) {
+    for (const to of options) {
+      assert.equal(
+        stageChangeLock(finance, { bankLoan: from }, 'bankLoan', to, null).allowed,
+        true,
+        `${from} -> ${to} should be allowed`
+      )
+    }
+  }
+  // Skipping ahead and stepping back are both fine now.
   assert.equal(
-    stageChangeLock(finance, current, 'bankLoan', 'Request submitted', null).allowed,
+    stageChangeLock(finance, { bankLoan: 'Not applicable' }, 'bankLoan', 'Completed', null).allowed,
     true
   )
-  assert.equal(stageChangeLock(finance, current, 'bankLoan', 'Rejected', null).allowed, true)
-  assert.equal(stageChangeLock(finance, current, 'bankLoan', 'Approved', null).allowed, false)
-  assert.equal(stageChangeLock(finance, current, 'bankLoan', 'Completed', null).allowed, false)
   assert.equal(
-    stageChangeLock(finance, { bankLoan: 'Request submitted' }, 'bankLoan', 'Approved', null)
+    stageChangeLock(finance, { bankLoan: 'Completed' }, 'bankLoan', 'Request submitted', null)
       .allowed,
     true
-  )
-  assert.equal(
-    stageChangeLock(finance, { bankLoan: 'Request submitted' }, 'bankLoan', 'Completed', null)
-      .allowed,
-    false
-  )
-  assert.equal(
-    stageChangeLock(finance, { bankLoan: 'Approved' }, 'bankLoan', 'Rejected', null).allowed,
-    true
-  )
-  assert.equal(
-    stageChangeLock(finance, { bankLoan: 'Completed' }, 'bankLoan', 'Approved', null).allowed,
-    false
   )
 })

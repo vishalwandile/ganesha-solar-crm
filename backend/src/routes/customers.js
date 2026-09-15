@@ -36,7 +36,9 @@ import {
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 500 * 1024, files: 1 },
+  // Images may arrive up to 1 MB and are compressed below 250 KB before storage.
+  // Documents are checked separately and must already be at most 250 KB.
+  limits: { fileSize: 1024 * 1024, files: 1 },
 })
 
 function documentLocation(document) {
@@ -152,7 +154,7 @@ router.get(
   asyncHandler(async (req, res) => {
     const filters = z
       .object({
-        queue: z.enum(['installation', 'pmSuryaghar', 'payments']).optional(),
+        queue: z.enum(['installation', 'pmSuryaghar', 'closure', 'payments']).optional(),
         subStage: z.string().min(1).max(80).optional(),
         status: z.enum(['all', 'New', 'In progress', 'Completed', 'Inactive']).optional(),
       })
@@ -384,6 +386,10 @@ router.post(
     if (!req.file) throw new HttpError(400, 'File is required')
     if (!ALLOWED_UPLOAD_MIMES.has(req.file.mimetype) || !hasValidFileSignature(req.file)) {
       throw new HttpError(400, 'Only PDF, DOC, DOCX, PNG, JPG, and JPEG files are allowed')
+    }
+    const isImage = req.file.mimetype.startsWith('image/')
+    if (!isImage && req.file.size > 250 * 1024) {
+      throw new HttpError(400, 'PDF, DOC, and DOCX files must be 250 KB or smaller')
     }
     const preparedFile = await compressImage(req.file)
     const uploaded = await uploadFile({

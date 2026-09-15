@@ -14,7 +14,9 @@ export function errorHandler(err, req, res, next) {
   // eslint-disable-next-line no-unused-vars
   void next
   if (err.code === 'LIMIT_FILE_SIZE') {
-    return res.status(400).json({ error: 'File must be 500 KB or smaller' })
+    return res.status(400).json({
+      error: 'Images must be 1 MB or smaller; PDF, DOC, and DOCX files must be 250 KB or smaller',
+    })
   }
   const status = err.status || 500
   const payload = {

@@ -155,10 +155,7 @@ async function buildCategoriesPayload(customerId, defs) {
 
 function buildWorkflowCustomer(row, catPayload, defs) {
   const base = mapCustomerRow(row)
-  const requiredForClosure = ['rooftopSolar', 'pmSuryaghar', 'installation']
-  const closureBlockers = requiredForClosure
-    .filter((key) => catPayload.categoryStatuses[key] !== 'Completed')
-    .map((key) => defs.find((def) => def.key === key)?.label || key)
+  const closureBlockers = categoryClosureBlockers(defs, catPayload)
   return {
     ...base,
     ...catPayload,
@@ -168,14 +165,31 @@ function buildWorkflowCustomer(row, catPayload, defs) {
   }
 }
 
+function categoryClosureBlockers(defs, catPayload) {
+  return defs
+    .filter((def) => def.key !== 'closure')
+    .filter((def) => !def.optional || Boolean(catPayload.categories[def.key]))
+    .filter((def) => catPayload.categoryStatuses[def.key] !== 'Completed')
+    .map((def) => `${def.label} (${catPayload.categoryStatuses[def.key] || 'Pending'})`)
+}
+
+function financeReceivedFromValues(values = {}) {
+  const installmentTotal =
+    Number(values.installment1Amount || 0) + Number(values.installment2Amount || 0)
+  return installmentTotal || Number(values.amountReceived || 0)
+}
+
+function paymentClosureBlocker(totalDue, totalReceived) {
+  const pending = Math.max(0, Number(totalDue || 0) - Number(totalReceived || 0))
+  return pending > 0 ? `Payment pending ₹${pending.toLocaleString('en-IN')}` : null
+}
+
 export async function getCustomerById(id) {
   const { rows } = await query(`select * from customers where id = $1`, [id])
   if (!rows[0]) throw new HttpError(404, 'Customer not found')
 
   const defs = await loadCategoryDefs()
   const catPayload = await buildCategoriesPayload(id, defs)
-  const workflow = buildWorkflowCustomer(rows[0], catPayload, defs)
-
   const [docs, payments] = await Promise.all([
     query(
       `select id, doc_type, custom_name, file_name, file_url, storage_path, uploaded_at from documents
@@ -188,6 +202,20 @@ export async function getCustomerById(id) {
       [id]
     ),
   ])
+  const paymentRows = payments.rows.map((p) => ({
+    id: p.id,
+    amount: Number(p.amount),
+    mode: toFePaymentMode(p.mode),
+    date: p.paid_on,
+    createdAt: p.created_at,
+  }))
+  const normalPayments = paymentRows.reduce((sum, payment) => sum + payment.amount, 0)
+  const totalReceived =
+    normalPayments + financeReceivedFromValues(catPayload.categories.finance)
+  const paymentBlocker = paymentClosureBlocker(rows[0].total_due, totalReceived)
+  const workflow = buildWorkflowCustomer(rows[0], catPayload, defs)
+  if (paymentBlocker) workflow.closureBlockers.push(paymentBlocker)
+  workflow.closureReady = workflow.closureBlockers.length === 0
 
   return {
     ...workflow,
@@ -200,22 +228,17 @@ export async function getCustomerById(id) {
       storagePath: d.storage_path,
       uploadedAt: d.uploaded_at,
     })),
-    payments: payments.rows.map((p) => ({
-      id: p.id,
-      amount: Number(p.amount),
-      mode: toFePaymentMode(p.mode),
-      date: p.paid_on,
-      createdAt: p.created_at,
-    })),
+    payments: paymentRows,
   }
 }
 
 async function loadPipelineSnapshot() {
-  const defs = (await loadCategoryDefs())
+  const allDefs = await loadCategoryDefs()
+  const defs = allDefs
     .filter((def) => STAGE_QUEUE_KEYS.includes(def.key))
     .sort((a, b) => STAGE_QUEUE_KEYS.indexOf(a.key) - STAGE_QUEUE_KEYS.indexOf(b.key))
-  const dbCategories = defs.map((def) => def.dbKey)
-  const [customerResult, stageResult, paymentResult, financeResult] = await Promise.all([
+  const dbCategories = allDefs.map((def) => def.dbKey)
+  const [customerResult, stageResult, paymentResult, categoryResult] = await Promise.all([
     query(`select * from customers where is_active = true order by created_at desc, id desc`),
     query(
       `select css.customer_id, css.category, css.sub_stage_key, css.value, css.stage_date
@@ -232,10 +255,10 @@ async function loadPipelineSnapshot() {
        group by p.customer_id`
     ),
     query(
-      `select cc.customer_id, cc.extra
+      `select cc.customer_id, cc.category, cc.extra
        from customer_categories cc
        join customers c on c.id = cc.customer_id
-       where c.is_active = true and cc.category = 'finance'`
+       where c.is_active = true`
     ),
   ])
 
@@ -247,14 +270,19 @@ async function loadPipelineSnapshot() {
   const paymentsByCustomer = new Map(
     paymentResult.rows.map((row) => [row.customer_id, Number(row.total || 0)])
   )
-  const financeByCustomer = new Map(
-    financeResult.rows.map((row) => [row.customer_id, row.extra || {}])
-  )
+  const categoriesByCustomer = new Map()
+  for (const row of categoryResult.rows) {
+    if (!categoriesByCustomer.has(row.customer_id)) {
+      categoriesByCustomer.set(row.customer_id, new Map())
+    }
+    categoriesByCustomer.get(row.customer_id).set(row.category, row.extra || {})
+  }
 
   const customers = customerResult.rows.map((row) => {
     const stageRows = stagesByCustomer.get(row.id) || []
+    const customerCategories = categoriesByCustomer.get(row.id) || new Map()
     const pipeline = {}
-    for (const def of defs) {
+    for (const def of allDefs) {
       const values = {}
       for (const stage of def.subStages) {
         const saved = stageRows.find(
@@ -268,12 +296,30 @@ async function loadPipelineSnapshot() {
 
     const totalDue = Number(row.total_due || 0)
     const normalPayments = paymentsByCustomer.get(row.id) || 0
-    const loanReceived = loanReceivedFromExtra(financeByCustomer.get(row.id))
+    const loanReceived = loanReceivedFromExtra(customerCategories.get('finance'))
     const totalReceived = normalPayments + loanReceived
     pipeline.payments = {
       totalDue,
       totalReceived,
       pendingAmount: Math.max(0, totalDue - totalReceived),
+    }
+    const closureReasons = allDefs
+      .filter((def) => def.key !== 'closure')
+      .filter((def) => !def.optional || customerCategories.has(def.dbKey))
+      .filter((def) => !pipeline[def.key].complete)
+      .map((def) => {
+        const open = pipeline[def.key].openStage
+        return open ? `${def.label}: ${open.label}` : `${def.label}: not completed`
+      })
+    if (pipeline.payments.pendingAmount > 0) {
+      closureReasons.push(
+        `Payment pending ₹${pipeline.payments.pendingAmount.toLocaleString('en-IN')}`
+      )
+    }
+    pipeline.closureEligibility = {
+      ready: closureReasons.length === 0,
+      reasons: closureReasons,
+      closed: pipeline.closure?.complete || false,
     }
 
     return { row, pipeline }
@@ -331,6 +377,15 @@ export async function getPipelineQueueSummary({ includePayments = true } = {}) {
       ),
     })
   }
+  const closurePending = snapshot.customers.filter(
+    (customer) => !customer.pipeline.closureEligibility.closed
+  )
+  queues.push({
+    key: 'closure',
+    label: 'Closure pending',
+    type: 'closure',
+    pendingCount: closurePending.length,
+  })
   return queues
 }
 
@@ -341,7 +396,7 @@ async function listPipelineCustomers(search, page, pageSize, filters) {
   const queue = filters.queue
   const requestedStage = filters.subStage || ''
   const definition = snapshot.defs.find((def) => def.key === queue)
-  if (queue !== 'payments' && !definition) {
+  if (!['payments', 'closure'].includes(queue) && !definition) {
     throw new HttpError(400, 'Unknown pipeline queue')
   }
   if (
@@ -364,6 +419,8 @@ async function listPipelineCustomers(search, page, pageSize, filters) {
     }
     if (queue === 'payments') {
       if (customer.pipeline.payments.pendingAmount <= 0) return false
+    } else if (queue === 'closure') {
+      if (customer.pipeline.closureEligibility.closed) return false
     } else {
       const open = customer.pipeline[queue].openStage
       if (!open) return false
@@ -386,7 +443,13 @@ async function listPipelineCustomers(search, page, pageSize, filters) {
       const queueData =
         queue === 'payments'
           ? { queue, ...pipeline.payments }
-          : {
+          : queue === 'closure'
+            ? {
+                queue,
+                ready: pipeline.closureEligibility.ready,
+                pendingReasons: pipeline.closureEligibility.reasons,
+              }
+            : {
               queue,
               openSubStage: publicStage(pipeline[queue].openStage),
               lastCompletedSubStage: publicStage(
@@ -694,14 +757,23 @@ export async function saveCategory(customerId, categoryKey, payload, user) {
     )
 
   if (closesProject) {
-    const requiredForClosure = ['rooftopSolar', 'pmSuryaghar', 'installation']
-    const blockers = requiredForClosure
-      .filter((key) => before.categoryStatuses[key] !== 'Completed')
-      .map((key) => defs.find((item) => item.key === key)?.label || key)
+    const blockers = categoryClosureBlockers(defs, before)
+    const paidResult = await query(
+      `select coalesce(sum(amount), 0)::numeric as total from payments where customer_id = $1`,
+      [customerId]
+    )
+    const totalReceived =
+      Number(paidResult.rows[0]?.total || 0) +
+      financeReceivedFromValues(before.categories.finance)
+    const paymentBlocker = paymentClosureBlocker(
+      customerState.rows[0].total_due,
+      totalReceived
+    )
+    if (paymentBlocker) blockers.push(paymentBlocker)
     if (blockers.length) {
       throw new HttpError(
         409,
-        `Complete these stages before closure: ${blockers.join(', ')}`,
+        `Complete all applicable sections and collect 100% payment before closure: ${blockers.join(', ')}`,
         { blockers }
       )
     }
@@ -795,7 +867,7 @@ export async function saveCategory(customerId, categoryKey, payload, user) {
     !startsPipeline
   ) {
     return {
-      customer: buildWorkflowCustomer(customerState.rows[0], before, defs),
+      customer: await getCustomerById(customerId),
       notificationCreated: false,
     }
   }
@@ -887,10 +959,8 @@ export async function saveCategory(customerId, categoryKey, payload, user) {
     )
   }
 
-  const after = await buildCategoriesPayload(customerId, defs)
-  const updatedCustomer = await query(`select * from customers where id = $1`, [customerId])
   return {
-    customer: buildWorkflowCustomer(updatedCustomer.rows[0], after, defs),
+    customer: await getCustomerById(customerId),
     notificationCreated: false,
   }
 }
