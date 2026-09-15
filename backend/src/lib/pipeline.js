@@ -1,49 +1,9 @@
 export const STAGE_QUEUE_KEYS = ['installation', 'pmSuryaghar']
-export const PIPELINE_QUEUE_KEYS = [...STAGE_QUEUE_KEYS, 'payments']
+export const PIPELINE_QUEUE_KEYS = [...STAGE_QUEUE_KEYS, 'closure', 'payments']
 export const SEQUENTIAL_CATEGORY_KEYS = new Set(STAGE_QUEUE_KEYS)
-export const BANK_LOAN_SEQUENCE = [
-  'Not applicable',
-  'Request submitted',
-  'Approved',
-  'Completed',
-]
 
 function normalizedCategoryKey(key) {
   return key === 'pm_suryaghar' ? 'pmSuryaghar' : key
-}
-
-export function normalizeBankLoanValue(value) {
-  if (value === 'Not Applicable') return 'Not applicable'
-  if (value === 'Request Submitted') return 'Request submitted'
-  return value
-}
-
-export function allowedBankLoanValues(currentValue) {
-  const current = normalizeBankLoanValue(currentValue)
-  const allowed = new Set(['Rejected'])
-  if (current) allowed.add(current)
-  if (current === 'Rejected') {
-    allowed.add('Not applicable')
-    allowed.add('Request submitted')
-    return [...allowed]
-  }
-  const index = BANK_LOAN_SEQUENCE.indexOf(current)
-  if (index === -1) {
-    allowed.add('Not applicable')
-    allowed.add('Request submitted')
-    return [...allowed]
-  }
-  if (index + 1 < BANK_LOAN_SEQUENCE.length) {
-    allowed.add(BANK_LOAN_SEQUENCE[index + 1])
-  }
-  return [...allowed]
-}
-
-export function nextBankLoanValue(currentValue) {
-  const current = normalizeBankLoanValue(currentValue)
-  const index = BANK_LOAN_SEQUENCE.indexOf(current)
-  if (index === -1 || index + 1 >= BANK_LOAN_SEQUENCE.length) return null
-  return BANK_LOAN_SEQUENCE[index + 1]
 }
 
 export function isStageDone(categoryKey, value) {
@@ -89,31 +49,9 @@ export function resolveCategoryPipeline(categoryDef, values = {}) {
 
 export function stageChangeLock(categoryDef, values, stageKey, nextValue, nextDate) {
   const categoryKey = normalizedCategoryKey(categoryDef.key || categoryDef.dbKey)
-  const isBankLoan =
-    categoryKey === 'finance' && (stageKey === 'bankLoan' || stageKey === 'bank_loan')
 
-  if (isBankLoan) {
-    const currentValue = values.bankLoan ?? values.bank_loan
-    const valueChanged = normalizeBankLoanValue(nextValue) !== normalizeBankLoanValue(currentValue)
-    if (!valueChanged) return { allowed: true }
-    if (allowedBankLoanValues(currentValue).includes(normalizeBankLoanValue(nextValue))) {
-      return { allowed: true }
-    }
-    const nextStep = nextBankLoanValue(currentValue)
-    return {
-      allowed: false,
-      reason: 'sequence',
-      message: nextStep
-        ? `Select Bank Loan statuses in sequence. Next allowed: ${nextStep}. Rejected can be selected anytime.`
-        : 'Bank Loan is already complete. Only Rejected can be selected.',
-      openStage: {
-        key: 'bankLoan',
-        label: nextStep || 'Bank Loan',
-      },
-      attemptedStage: { key: 'bankLoan', label: 'Bank Loan' },
-    }
-  }
-
+  // Only Installation and PM Suryaghar are sequential. Finance (and the rest)
+  // can move to any status at any time.
   if (!SEQUENTIAL_CATEGORY_KEYS.has(categoryKey)) return { allowed: true }
 
   const pipeline = resolveCategoryPipeline(categoryDef, values)

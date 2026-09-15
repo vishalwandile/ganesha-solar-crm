@@ -139,6 +139,7 @@ export default function Users() {
   }
 
   function startEdit(user) {
+    if (user.isSystemAdmin) return
     setEditingId(user.id)
     setEditMobile(user.mobile || '')
     setEditFeatures(user.isAdmin ? FEATURES.map((f) => f.key) : user.features || [])
@@ -147,6 +148,10 @@ export default function Users() {
 
   async function saveAccess(user) {
     setError('')
+    if (user.isSystemAdmin) {
+      setEditingId(null)
+      return
+    }
     if (editMobile && !/^[6-9]\d{9}$/.test(editMobile)) {
       setError('Enter a valid 10-digit Indian mobile number.')
       return
@@ -308,15 +313,19 @@ export default function Users() {
             <div className="flex items-start gap-2 rounded-xl bg-slate-50 px-3 py-2.5">
               <IconTeam className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" />
               <p className="text-xs leading-relaxed text-ink-muted">
-                {(u.features || []).length
-                  ? FEATURES.filter((f) => (u.isAdmin ? true : (u.features || []).includes(f.key)))
-                      .map((f) => f.label)
-                      .join(', ')
-                  : 'No screens assigned'}
+                {u.isSystemAdmin
+                  ? 'Full access to every screen and stage. Access cannot be changed.'
+                  : (u.features || []).length
+                    ? FEATURES.filter((f) => (u.isAdmin ? true : (u.features || []).includes(f.key)))
+                        .map((f) => f.label)
+                        .join(', ')
+                    : 'No screens assigned'}
               </p>
             </div>
-            <p className="mt-2 text-xs text-ink-muted">Stages: {u.permissionsLabel || 'View only'}</p>
-            {sessionUser?.isAdmin && editingId === u.id && (
+            {!u.isSystemAdmin && (
+              <p className="mt-2 text-xs text-ink-muted">Stages: {u.permissionsLabel || 'View only'}</p>
+            )}
+            {sessionUser?.isAdmin && !u.isSystemAdmin && editingId === u.id && (
               <div className="mt-3 space-y-3">
                 <div>
                   <label className="ui-label">Mobile number</label>
@@ -350,7 +359,7 @@ export default function Users() {
                 </div>
               </div>
             )}
-            {sessionUser?.isAdmin && editingId !== u.id && (
+            {sessionUser?.isAdmin && !u.isSystemAdmin && editingId !== u.id && (
               <button type="button" className="mt-3 mr-3 text-xs font-bold text-blue-700 hover:text-blue-800" onClick={() => startEdit(u)}>
                 Edit access
               </button>

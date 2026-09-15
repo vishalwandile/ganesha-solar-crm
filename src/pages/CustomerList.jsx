@@ -33,22 +33,23 @@ const QUEUE_FILTERS = [
   { value: '', label: 'Any queue' },
   { value: 'installation', label: 'Installation pending' },
   { value: 'pmSuryaghar', label: 'PM Suryaghar pending' },
+  { value: 'closure', label: 'Closure pending' },
   { value: 'payments', label: 'Payments pending', feature: 'payments' },
 ]
 
 const EMPTY_FILTERS = { search: '', status: '', queue: '', subStage: '' }
 
-// 1 … 4 5 6 … 12 — always keeps the first, last and neighbours of the current page.
+// Sliding window: two pages either side of the current one, so a 100-page list
+// still shows five buttons and the numbers move along as you page.
+const PAGE_WINDOW = 5
+
 function pageItems(current, total) {
-  if (total <= 7) return Array.from({ length: total }, (_, index) => index + 1)
-  const first = Math.max(2, Math.min(current - 1, total - 4))
-  const last = Math.min(total - 1, Math.max(current + 1, 5))
-  const items = [1]
-  if (first > 2) items.push('start-gap')
-  for (let p = first; p <= last; p += 1) items.push(p)
-  if (last < total - 1) items.push('end-gap')
-  items.push(total)
-  return items
+  const span = Math.min(PAGE_WINDOW, total)
+  const start = Math.min(
+    Math.max(1, current - Math.floor(span / 2)),
+    Math.max(1, total - span + 1)
+  )
+  return Array.from({ length: span }, (_, index) => start + index)
 }
 
 export default function CustomerList() {
@@ -68,11 +69,13 @@ export default function CustomerList() {
   const appliedSearch = searchParams.get('search') || ''
   const requestedQueue = canFilterPipeline ? searchParams.get('queue') || '' : ''
   const permittedQueues = canSeePayments
-    ? ['installation', 'pmSuryaghar', 'payments']
-    : ['installation', 'pmSuryaghar']
+    ? ['installation', 'pmSuryaghar', 'closure', 'payments']
+    : ['installation', 'pmSuryaghar', 'closure']
   const appliedQueue = permittedQueues.includes(requestedQueue) ? requestedQueue : ''
   const appliedSubStage =
-    appliedQueue && appliedQueue !== 'payments' ? searchParams.get('subStage') || '' : ''
+    appliedQueue && !['payments', 'closure'].includes(appliedQueue)
+      ? searchParams.get('subStage') || ''
+      : ''
   const requestedStatus = searchParams.get('status') || ''
   const appliedStatus = STATUS_FILTERS.some((item) => item.value === requestedStatus)
     ? requestedStatus
@@ -122,7 +125,9 @@ export default function CustomerList() {
     }
   }, [appliedSearch, appliedQueue, appliedSubStage, appliedStatus, page, refreshCustomers])
 
-  const draftCategory = categoryDefs.find((category) => category.key === draft.queue)
+  const draftCategory = ['payments', 'closure'].includes(draft.queue)
+    ? null
+    : categoryDefs.find((category) => category.key === draft.queue)
   const appliedCategory = categoryDefs.find((category) => category.key === appliedQueue)
 
   const dirty =
@@ -138,7 +143,7 @@ export default function CustomerList() {
     if (next.search?.trim()) params.set('search', next.search.trim())
     if (next.status) params.set('status', next.status)
     if (next.queue) params.set('queue', next.queue)
-    if (next.queue && next.queue !== 'payments' && next.subStage) {
+    if (next.queue && !['payments', 'closure'].includes(next.queue) && next.subStage) {
       params.set('subStage', next.subStage)
     }
     setSearchParams(params)
@@ -364,7 +369,7 @@ export default function CustomerList() {
                 <th className="px-5 py-3.5 text-xs font-bold uppercase tracking-wide text-ink-muted">
                   Capacity
                 </th>
-                {appliedQueue && appliedQueue !== 'payments' && (
+                {appliedQueue && !['payments', 'closure'].includes(appliedQueue) && (
                   <>
                     <th className="px-5 py-3.5 text-xs font-bold uppercase tracking-wide text-ink-muted">
                       Current step
@@ -386,6 +391,11 @@ export default function CustomerList() {
                       Pending
                     </th>
                   </>
+                )}
+                {appliedQueue === 'closure' && (
+                  <th className="px-5 py-3.5 text-xs font-bold uppercase tracking-wide text-ink-muted">
+                    Pending reason
+                  </th>
                 )}
                 <th className="px-5 py-3.5 text-xs font-bold uppercase tracking-wide text-ink-muted">Status</th>
                 <th className="px-5 py-3.5 text-right text-xs font-bold uppercase tracking-wide text-ink-muted">
@@ -409,7 +419,7 @@ export default function CustomerList() {
                       {c.solarCapacity || '—'}
                     </span>
                   </td>
-                  {appliedQueue && appliedQueue !== 'payments' && (
+                  {appliedQueue && !['payments', 'closure'].includes(appliedQueue) && (
                     <>
                       <td className="px-5 py-3.5">
                         <div className="font-semibold text-orange-700">
@@ -442,6 +452,21 @@ export default function CustomerList() {
                       </td>
                     </>
                   )}
+                  {appliedQueue === 'closure' && (
+                    <td className="px-5 py-3.5">
+                      {(c.pipeline?.pendingReasons || []).length ? (
+                        <ul className="space-y-1 text-xs font-medium text-orange-700">
+                          {c.pipeline.pendingReasons.map((reason) => (
+                            <li key={reason}>• {reason}</li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <span className="text-xs font-semibold text-green-700">
+                          Ready for closure
+                        </span>
+                      )}
+                    </td>
+                  )}
                   <td className="px-5 py-3.5">
                     <div className="flex flex-wrap gap-1.5">
                       <StatusBadge status={c.overallStatus} />
@@ -463,7 +488,15 @@ export default function CustomerList() {
               {!loading && customers.length === 0 && (
                 <tr>
                   <td
-                    colSpan={appliedQueue === 'payments' ? 10 : appliedQueue ? 9 : 7}
+                    colSpan={
+                      appliedQueue === 'payments'
+                        ? 10
+                        : appliedQueue === 'closure'
+                          ? 8
+                          : appliedQueue
+                            ? 9
+                            : 7
+                    }
                     className="px-5 py-10 text-center text-sm text-ink-soft"
                   >
                     No customers match these filters.
@@ -487,28 +520,22 @@ export default function CustomerList() {
             >
               Previous
             </button>
-            {pageItems(page, totalPages).map((item) =>
-              typeof item === 'number' ? (
-                <button
-                  key={item}
-                  type="button"
-                  aria-current={item === page ? 'page' : undefined}
-                  disabled={loading}
-                  onClick={() => setPage(item)}
-                  className={`h-8 min-w-8 rounded-lg px-2 text-xs font-bold tabular-nums transition disabled:opacity-50 ${
-                    item === page
-                      ? 'bg-orange-500 text-white shadow-soft'
-                      : 'border border-slate-200 bg-white text-ink hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700'
-                  }`}
-                >
-                  {item}
-                </button>
-              ) : (
-                <span key={item} className="px-1 text-xs font-semibold text-ink-soft">
-                  …
-                </span>
-              )
-            )}
+            {pageItems(page, totalPages).map((item) => (
+              <button
+                key={item}
+                type="button"
+                aria-current={item === page ? 'page' : undefined}
+                disabled={loading}
+                onClick={() => setPage(item)}
+                className={`h-8 min-w-8 rounded-lg px-2 text-xs font-bold tabular-nums transition disabled:opacity-50 ${
+                  item === page
+                    ? 'bg-orange-500 text-white shadow-soft'
+                    : 'border border-slate-200 bg-white text-ink hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700'
+                }`}
+              >
+                {item}
+              </button>
+            ))}
             <button
               type="button"
               className="ui-btn-secondary px-3 py-1.5 text-xs"

@@ -194,6 +194,11 @@ export default function Dashboard() {
                     Customers whose amount due is greater than payments and loan installments received.
                   </div>
                 )}
+                {queue.type === 'closure' && (
+                  <div className="px-5 py-4 text-xs text-ink-muted">
+                    Customers not yet closed. Open the list to see incomplete sections or pending payment.
+                  </div>
+                )}
               </div>
             ))}
           </div>

@@ -156,10 +156,13 @@ router.patch(
   asyncHandler(async (req, res) => {
     const body = accessSchema.parse(req.body)
     const { rows } = await query(
-      `select id, is_admin, team, features from users where id = $1 and is_active = true`,
+      `select id, is_admin, is_system_admin, team, features from users where id = $1 and is_active = true`,
       [req.params.id]
     )
     if (!rows[0]) throw new HttpError(404, 'User not found')
+    if (rows[0].is_system_admin) {
+      throw new HttpError(403, 'The system administrator always has full access and cannot be edited')
+    }
 
     await withTransaction(async (client) => {
       if (body.mobile !== undefined) {
@@ -200,8 +203,13 @@ router.patch(
   requireAdmin,
   asyncHandler(async (req, res) => {
     const body = z.object({ permissions: z.array(permissionItem) }).parse(req.body)
-    const { rows } = await query(`select id from users where id = $1`, [req.params.id])
+    const { rows } = await query(`select id, is_system_admin from users where id = $1`, [
+      req.params.id,
+    ])
     if (!rows[0]) throw new HttpError(404, 'User not found')
+    if (rows[0].is_system_admin) {
+      throw new HttpError(403, 'The system administrator always has full access and cannot be edited')
+    }
 
     await withTransaction(async (client) => {
       await client.query(`delete from user_category_permissions where user_id = $1`, [
