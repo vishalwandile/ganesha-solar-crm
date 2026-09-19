@@ -30,10 +30,10 @@ export default function StageTracker({
       </div>
       <div className="flex min-w-[680px] items-center">
         {categoryDefs.map((cat, i) => {
-          const isNotApplicable = cat.optional && !customer.categories[cat.key]
+          const isNotApplicable = cat.optional && !customer.categories?.[cat.key]
           const status = isNotApplicable
             ? 'Not applicable'
-            : getCategoryStatus(cat, customer.categories[cat.key])
+            : getCategoryStatus(cat, customer.categories?.[cat.key])
           const isLast = i === categoryDefs.length - 1
           const isActive = activeKey === cat.key
 

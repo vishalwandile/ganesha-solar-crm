@@ -173,7 +173,10 @@ function categoryClosureBlockers(defs, catPayload) {
     .map((def) => `${def.label} (${catPayload.categoryStatuses[def.key] || 'Pending'})`)
 }
 
-function financeReceivedFromValues(values = {}) {
+// Optional categories are stored as null when the customer never enabled them,
+// and older finance rows predate the two-installment fields, so accept both.
+function financeReceivedFromValues(values) {
+  if (!values || typeof values !== 'object') return 0
   const installmentTotal =
     Number(values.installment1Amount || 0) + Number(values.installment2Amount || 0)
   return installmentTotal || Number(values.amountReceived || 0)

@@ -87,6 +87,10 @@ test('uses category-aware completion and installment-aware receipts', () => {
     loanReceivedFromExtra({ amount_received: 140000, installment1_amount: null }),
     140000
   )
+  // Customers without the finance track have no extra at all.
+  assert.equal(loanReceivedFromExtra(null), 0)
+  assert.equal(loanReceivedFromExtra(undefined), 0)
+  assert.equal(loanReceivedFromExtra({}), 0)
 })
 
 const finance = {
