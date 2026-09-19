@@ -77,7 +77,8 @@ export function stageChangeLock(categoryDef, values, stageKey, nextValue, nextDa
   }
 }
 
-export function loanReceivedFromExtra(extra = {}) {
+export function loanReceivedFromExtra(extra) {
+  if (!extra || typeof extra !== 'object') return 0
   const hasInstallments =
     Object.prototype.hasOwnProperty.call(extra, 'installment1_amount') ||
     Object.prototype.hasOwnProperty.call(extra, 'installment2_amount')
